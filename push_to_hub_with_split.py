@@ -26,6 +26,7 @@ def push_to_my_hub(dataset_name, language, hub_name: str, test_size=0.3):
         "ner_tags": Sequence(ClassLabel(names=label_list))
     })
 
+    # TODO: polyglot 외에도 다른 데이터에 맞게끔 변경
     new_dataset_dict = defaultdict(lambda: dict)
     for i in tqdm(cloud_dataset["train"]):
         new_dataset_dict[i["id"]] = {"id": i["id"],
