@@ -54,7 +54,7 @@ class NerProcessor:
             return cached_file
 
         self.logger.info(f"Creating dataset named '{self.args.dataset_name}'")
-입        if self.args.dataset_name == "wikiann":
+        if self.args.dataset_name == "wikiann":
             self.raw_dataset = load_dataset(self.args.dataset_name, self.args.dataset_lang)
         else:
             self.raw_dataset = load_dataset(self.args.dataset_name)
