@@ -16,7 +16,7 @@ class NerProcessor:
         self.args = args
         self.mode = args.data_mode
 
-        cached_file_name = f"cached-{self.args.dataset_name_alias}_{self.args.data_mode}-seq_len_{self.args.max_seq_length}"
+        cached_file_name = f"cached-{self.args.dataset_name}_{self.args.dataset_lang}_{self.args.data_mode}-seq_len_{self.args.max_seq_length}"
         if "random" in self.args.data_mode:
             cached_file_name += f"-portion_{self.args.portion}"
         cached_file_name += f"-{self.args.initial_train_n_percentage}%"
