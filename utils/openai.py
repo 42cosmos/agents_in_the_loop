@@ -7,7 +7,8 @@ import logging.config
 from dotenv import load_dotenv
 
 import openai
-from .prompt_ner import CONLL_PROMPT, KLUE_PROMPT, base_request_data, TWEE_PROMPT, BTC_PROMPT, WNUT_PROMPT, WIKIANN_PROMPT
+from .prompt_ner import CONLL_PROMPT, KLUE_PROMPT, base_request_data, TWEE_PROMPT, BTC_PROMPT, WNUT_PROMPT, \
+    WIKIANN_PROMPT
 
 PROMPTS = {
     "klue": KLUE_PROMPT,
@@ -28,11 +29,24 @@ class OpenAIGpt:
             load_dotenv()
 
         self.logger = logging.getLogger("openai")
-        self._api_key = os.getenv("OPENAI_API_KEY")
-        assert self._api_key is not None, "Please set OPENAI_API_KEY in .env file"
-        openai.api_key = self._api_key
+        self.__api_key = os.getenv("OPENAI_API_KEY")
+        self.__organisation_key = os.getenv("ORGANISATION_KEY")
+        assert self.__api_key is not None, "Please set OPENAI_API_KEY in .env file"
 
-    def request(self, request_data: list, model):
+        if self.__organisation_key:
+            openai.organization = self.__organisation_key
+
+        openai.api_key = self.__api_key
+
+    @property
+    def api_key(self):
+        raise Exception("Direct Access to api_key is not allowed")
+
+    @api_key.setter
+    def api_key(self, value):
+        raise Exception("Direct modification of api_key is not allowed")
+
+    def request(self, request_data: list, model: str, functions=None):
         request_data = [{"role": role, "content": content} for role, content in request_data]
         completion = openai.ChatCompletion.create(
             model=model,
