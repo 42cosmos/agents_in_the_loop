@@ -23,7 +23,7 @@ def setup_logging(file_name=None):
 
     today = f'[{datetime.datetime.today().strftime("%Y-%m-%d-%H:%M:%S")}]'
 
-    log_config_file = os.path.join(proj_dir, "logging_config.json")
+    log_config_file = os.path.join(main_script_dir, "logging_config.json")
 
     if file_name:
         log_file = os.path.join(logs_dir, f"{today}-{file_name}.log")
