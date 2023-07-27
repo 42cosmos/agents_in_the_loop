@@ -1,0 +1,7 @@
+datasets:
+  - wikiann
+  - polyglot_ner
+
+models:
+  - roberta-base
+  - bert-base
