@@ -22,7 +22,7 @@ def push_to_my_hub(dataset_name, language, hub_name: str, test_size=0.3):
 
     dataset_features = Features({
         "id": Value(dtype="string"),
-        "tokens": Value(dtype="string"),
+        "tokens": Sequence(feature=Value(dtype="string")),
         "ner_tags": Sequence(ClassLabel(names=label_list))
     })
 
