@@ -17,6 +17,9 @@ class NerProcessor:
         self.mode = args.data_mode
 
         cached_file_name = f"cached-{self.args.dataset_name}_{self.args.dataset_lang}_{self.args.data_mode}-seq_len_{self.args.max_seq_length}"
+        if "/" in cached_file_name:
+            cached_file_name = cached_file_name.replace("/", "_")
+
         if "random" in self.args.data_mode:
             cached_file_name += f"-portion_{self.args.portion}"
 
