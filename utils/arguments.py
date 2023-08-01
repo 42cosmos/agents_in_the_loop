@@ -117,7 +117,7 @@ class DataTrainingArguments:
     data_mode: str = field(default="original", metadata={"help": "The mode of data (train, valid, test)."})
     portion: float = field(default=0.2, metadata={
         "help": "The portion of data to use when you choose random_entity_parital mode. Please input between 0 and 1."})
-    data_dir: str = field(default="/home/eunbinpark/workspace/LLM-In-The-Loop/cached_dataset",
+    data_dir: str = field(default="/home/eunbinpark/workspace/Agents-in-the-loop/cached_dataset",
                           metadata={"help": "The directory of data."})
     valid_data_modes = ("original", "random_entity", "random_word_and_entity", "random_entity_partial", "unlabelled")
     dataset_config_name: Optional[str] = field(

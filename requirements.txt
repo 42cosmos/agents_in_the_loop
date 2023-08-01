@@ -1,0 +1,11 @@
+evaluate
+datasets
+transformers
+
+
+openai
+tiktoken
+seqeval
+
+easydict
+python-dotenv

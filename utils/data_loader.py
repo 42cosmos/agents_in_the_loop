@@ -16,10 +16,12 @@ class NerProcessor:
         self.args = args
         self.mode = args.data_mode
 
-        cached_file_name = f"cached-{self.args.dataset_name_alias}_{self.args.data_mode}-seq_len_{self.args.max_seq_length}"
+        cached_file_name = f"cached-{self.args.dataset_name}_{self.args.dataset_lang}_{self.args.data_mode}-seq_len_{self.args.max_seq_length}"
         if "random" in self.args.data_mode:
             cached_file_name += f"-portion_{self.args.portion}"
-        cached_file_name += f"-{self.args.initial_train_n_percentage}%"
+
+        if "original" != self.args.data_mode:
+            cached_file_name += f"-{self.args.initial_train_n_percentage}%"
 
         self.cached_file_name = cached_file_name
         self.cached_features_file = os.path.join(self.args.data_dir, cached_file_name)
@@ -52,15 +54,10 @@ class NerProcessor:
             return cached_file
 
         self.logger.info(f"Creating dataset named '{self.args.dataset_name}'")
-        if self.args.dataset_name == "klue":
-            self.raw_dataset = load_dataset(self.args.dataset_name, "ner")
         if self.args.dataset_name == "wikiann":
             self.raw_dataset = load_dataset(self.args.dataset_name, self.args.dataset_lang)
         else:
             self.raw_dataset = load_dataset(self.args.dataset_name)
-
-        if self.args.dataset_name_alias in ["btc", "twee"]:
-            self.raw_dataset = self.raw_dataset.rename_column("tags", "ner_tags")
 
         self.raw_dataset = self.raw_dataset if "id" in self.raw_dataset["train"].features else \
             self.raw_dataset.map(self.add_id, with_indices=True)
