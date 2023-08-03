@@ -7,18 +7,6 @@ import logging.config
 from dotenv import load_dotenv
 
 import openai
-from .prompt_ner import CONLL_PROMPT, KLUE_PROMPT, base_request_data, TWEE_PROMPT, BTC_PROMPT, WNUT_PROMPT, \
-    WIKIANN_PROMPT
-
-PROMPTS = {
-    "klue": KLUE_PROMPT,
-    "conll": CONLL_PROMPT,
-    "twee": TWEE_PROMPT,
-    "btc": BTC_PROMPT,
-    "wnut": WNUT_PROMPT,
-    "wiki": WIKIANN_PROMPT,
-}
-
 
 # 60 parallel api calls without problem
 class OpenAIGpt:
