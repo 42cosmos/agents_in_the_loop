@@ -5,6 +5,7 @@ from functools import partial
 
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from transformers import (
@@ -16,7 +17,6 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
-
 
 from utils import (
     setup_logging,
@@ -40,7 +40,7 @@ if __name__ == "__main__":
                                  "unlabelled"])
     parser.add_argument("--portion", type=float, default=1.0)
     args = parser.parse_args()
-    
+
     start_time = datetime.datetime.now()
 
     config = read_yaml("/home/eunbinpark/workspace/Agents-in-the-loop/config.yaml")
