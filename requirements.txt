@@ -2,6 +2,7 @@ evaluate
 datasets
 transformers
 
+langchain
 
 openai
 tiktoken
