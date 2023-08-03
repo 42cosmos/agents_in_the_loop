@@ -32,3 +32,6 @@ class RedisClient:
 
     def get_all_from_list(self, key):
         return [value.decode('utf-8') for value in self.r.lrange(key, 0, -1)]
+
+    def delete_key(self, key):
+        return self.r.delete(key)
