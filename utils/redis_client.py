@@ -8,7 +8,7 @@ class RedisClient:
     def get_all_keys(self, pattern='*'):
         return [key.decode('utf-8') for key in self.r.keys(pattern)]
 
-    def get_values_by_pattern(self, pattern):
+    def get_values_by_key_pattern(self, pattern):
         keys = self.get_all_keys(pattern)
         return {key: self.r.get(key).decode('utf-8') if self.r.get(key) else None for key in keys}
 
