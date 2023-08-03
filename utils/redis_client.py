@@ -13,6 +13,14 @@ class RedisClient:
             return value.decode('utf-8')
         return None
 
+    def get_all_keys(self):
+        """
+        Get all keys from redis
+        Beware of using this function in production...
+        :return:
+        """
+        return [key.decode('utf-8') for key in self.r.keys()]
+
     def add_to_set(self, key, *values):
         self.r.sadd(key, *values)
 
