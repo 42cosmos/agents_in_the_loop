@@ -20,7 +20,7 @@ from .llm.base import (
     ChatSequence
 )
 from .llm.chat import create_chat_completion, chat_with_agent
-from .llm.token_counter import num_tokens_from_messages, count_string_tokens
+from .llm.token_counter import count_message_tokens, count_string_tokens
 from .llm.openai import OpenAIFunctionSpec, OpenAIFunctionCall
 from .database.redis_client import RedisClient
 #
@@ -31,7 +31,7 @@ from .database.redis_client import RedisClient
 #            "LLMResponse",
 #            "OpenAIFunctionSpec",
 #            "OpenAIFunctionCall",
-#            "num_tokens_from_messages",
+#            "count_message_tokens",
 #            "count_string_tokens",
 #            "create_chat_completion",
 #            "chat_with_agent"
