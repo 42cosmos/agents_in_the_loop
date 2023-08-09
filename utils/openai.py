@@ -7,17 +7,6 @@ import logging.config
 from dotenv import load_dotenv
 
 import openai
-from .prompt_ner import CONLL_PROMPT, KLUE_PROMPT, base_request_data, TWEE_PROMPT, BTC_PROMPT, WNUT_PROMPT, \
-    WIKIANN_PROMPT
-
-PROMPTS = {
-    "klue": KLUE_PROMPT,
-    "conll": CONLL_PROMPT,
-    "twee": TWEE_PROMPT,
-    "btc": BTC_PROMPT,
-    "wnut": WNUT_PROMPT,
-    "wiki": WIKIANN_PROMPT,
-}
 
 
 # 60 parallel api calls without problem
@@ -69,25 +58,11 @@ class OpenAIGpt:
             self.logger.exception(f"Error: {e}")
             return False, 0
 
-    def find_entity(self, text, dataset_name=None, model="gpt-3.5-turbo"):
-        prompt_msg = PROMPTS[dataset_name]
-
-        request_data = base_request_data + [("user", prompt_msg + f"3. Sentence: {text}\nOutput:")]
-        return self.request(request_data=request_data, model=model)
-
-    @classmethod
-    def get_num_tokens_from_messages(cls, text: str, dataset_name: str, model="gpt-3.5-turbo"):
-        return OpenAIGpt.num_tokens_from_messages(messages=text,
-                                                  model=model,
-                                                  dataset_name=dataset_name)
-
     @staticmethod
-    def num_tokens_from_messages(messages: str, dataset_name: str, model="gpt-3.5-turbo-0301"):
+    def num_tokens_from_messages(messages: str, model="gpt-3.5-turbo-0301"):
         """Returns the number of tokens used by a list of messages."""
 
-        prompt = PROMPTS[dataset_name]
-        user_messages = base_request_data + [("user", f"3. Sentence: \nOutput:{prompt + messages}")]
-        msg_result = [{"role": role, "content": content} for role, content in user_messages]
+        msg_result = [{"role": role, "content": content} for role, content in messages]
 
         try:
             encoding = tiktoken.encoding_for_model(model)
