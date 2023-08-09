@@ -1,6 +1,6 @@
 import yaml
 from easydict import EasyDict
-from utils import Student
+from utils.llm.agent import Student
 
 
 if __name__ == "__main__":
