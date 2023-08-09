@@ -10,3 +10,5 @@ seqeval
 
 easydict
 python-dotenv
+
+redis
