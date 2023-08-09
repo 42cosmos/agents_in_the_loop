@@ -4,9 +4,9 @@ import argparse
 from functools import partial
 
 import os
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# import sys
+#
+# sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from transformers import (
     DataCollatorForTokenClassification,
@@ -45,7 +45,7 @@ if __name__ == "__main__":
 
     selected_dataset = args.dataset_name
     if args.dataset_name == "polyglot":
-        selected_dataset = f"cosmos42/{selected_dataset}-{args.dataset_lang}"
+        selected_dataset = f"eunbincosmos/{selected_dataset}-{args.dataset_lang}"
 
     model_args = ModelArguments(model_name_or_path=args.model_name)
     data_args = DataTrainingArguments(dataset_name=selected_dataset,
