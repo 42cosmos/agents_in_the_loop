@@ -43,9 +43,6 @@ if __name__ == "__main__":
 
     start_time = datetime.datetime.now()
 
-    config = read_yaml("/home/eunbinpark/workspace/Agents-in-the-loop/config.yaml")
-    # {'name': 'huggingface용 데이터셋 이름', 'language': '해당 데이터셋 대표 언어'}
-
     selected_dataset = args.dataset_name
     if args.dataset_name == "polyglot":
         selected_dataset = f"cosmos42/{selected_dataset}-{args.dataset_lang}"
