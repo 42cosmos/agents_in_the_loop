@@ -133,7 +133,7 @@ def get_openai_command_specs(agent) -> list[OpenAIFunctionSpec]:
                 for param in command.parameters
             },
         )
-        for command in agent.command_registry.commands.values()  # FIXME
+        for command in agent.command_registry.commands.values()  # FIX
     ]
 
 
