@@ -1,7 +1,10 @@
-datasets:
-  - wikiann
-  - polyglot_ner
+student:
+  model_name: gpt-3.5-turbo-0613
+  env_path: /home/eunbinpark/workspace/agents_in_the_loop/utils/.env
+  max_conversation_limit: 2
 
-models:
-  - roberta-base
-  - bert-base
+
+teacher:
+  model_name: gpt-3.5-turbo-0613
+  env_path: /home/eunbinpark/workspace/agents_in_the_loop/utils/.env
+  max_conversation_limit: 1
