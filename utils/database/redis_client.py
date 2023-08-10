@@ -84,7 +84,7 @@ class RedisVector(RedisClient):
             TagField(self.model_field_name),
             VectorField(self.vector_field_name,
                         algorithm,
-                        {"TYPE": "FLOAT64", "DIM": self.embedding_size, "DISTANCE": "L2"}),
+                        {"TYPE": "FLOAT64", "DIM": self.embedding_size, "DISTANCE_METRIC": "L2"}),
         )
 
         self.redis_conn.ft().create_index(schema)
