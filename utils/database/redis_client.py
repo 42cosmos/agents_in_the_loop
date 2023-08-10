@@ -68,7 +68,7 @@ class RedisVector(RedisClient):
         self.embedding_size = embedding_size
 
     def insert_vector(self, name, vector_value):
-        key = f"{self.doc_prefix}:{self.dataset_title_value}:{self.dataset_lang_value}:{self.model_title_value}:{name}"
+        key = f"{self.doc_prefix}{self.dataset_title_value}:{self.dataset_lang_value}:{self.model_title_value}:{name}"
         self.redis_conn.hset(
             key,
             mapping={self.dataset_field_name: self.dataset_title_value,
