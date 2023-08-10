@@ -64,14 +64,14 @@ class RedisVector(RedisClient):
         self.vector_field_name = vector_field_name
         self.embedding_size = embedding_size
 
-    def set_vector(self, name, *values):
+    def set_vector(self, name, vector_value):
 
         self.redis_conn.hset(
             name,
             mapping={self.dataset_field_name: self.dataset_title_value,
                      self.dataset_lang_field_name: self.dataset_lang_value,
                      self.model_field_name: self.model_title_value,
-                     self.vector_field_name: values},
+                     self.vector_field_name: vector_value},
         )
 
     def delete_data(self):
