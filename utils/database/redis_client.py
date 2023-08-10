@@ -89,8 +89,12 @@ class RedisVector(RedisClient):
 
         self.redis_conn.ft().create_index(schema)
 
-    def get_vector(self, name):
-        return self.redis_conn.hget(name, self.vector_field_name)
+    def get_vector(self, name, key):
+        """
+        :param name: 데이터베이스 key 값
+        :param key: 스키마의 key 값
+        """
+        return self.redis_conn.hget(name, key)
 
     def get_similar_vectors(self, name, num=10):
         # 주어진 name에서 벡터 및 필요한 메타데이터 정보를 가져옵니다.
