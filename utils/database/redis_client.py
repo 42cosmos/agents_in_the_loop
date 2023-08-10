@@ -96,12 +96,15 @@ class RedisVector(RedisClient):
         """
         return self.redis_conn.hget(name, key)
 
-    def get_similar_vectors(self, vector, num=10):
-        # 주어진 name에서 벡터 및 필요한 메타데이터 정보를 가져옵니다.
-        q = Query(
-            f'(@{self.dataset_field_name}:{self.dataset_title_value} @{self.dataset_lang_field_name}:{self.dataset_lang_value} @{self.model_field_name}:{self.model_title_value})=>[KNN {num} @{self.vector_field_name} $vec_param AS dist]').sort_by(
-            'dist')
+    def get_similar_vector_id(self, vector, num=10):
+        model_title = self.model_title_value.replace("-", "\-")
+        similarity_query = f'(@{self.dataset_field_name}:{{{{{self.dataset_title_value}}}}} ' \
+                           f'@{self.dataset_lang_field_name}:{{{{{self.dataset_lang_value}}}}} ' \
+                           f'@{self.model_field_name}:{{{{{model_title}}}}})' \
+                           f'=>[KNN {num} @{self.vector_field_name} $vec_param AS dist]'
+        q = Query(similarity_query).sort_by('dist')
         vector_params = {"vec_param": vector.tobytes()}
         res = self.redis_conn.ft().search(q, query_params=vector_params)
-
-        return res
+        # 데이터셋 아이디만 추출
+        doc_ids = [doc.id for doc in res.docs]
+        return doc_ids
