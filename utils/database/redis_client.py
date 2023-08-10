@@ -1,6 +1,7 @@
 import redis
 from redis.commands.search.field import VectorField, TagField, NumericField, TextField
 from redis.commands.search.query import Query
+from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 
 
 class RedisClient:
@@ -44,30 +45,32 @@ class RedisVector(RedisClient):
                  dataset_title_value: str,
                  dataset_lang_value: str,
                  model_title_value: str,
-                 host: str='localhost',
-                 port: int=6379,
+                 host: str = 'localhost',
+                 port: int = 6379,
                  db=0,
-                 dataset_field_name: str="dataset",
-                 dataset_lang_field_name:str="language",
-                 model_field_name: str="model",
-                 vector_field_name: str="embedding",
+                 dataset_field_name: str = "dataset_name",
+                 dataset_lang_field_name: str = "dataset_language",
+                 model_field_name: str = "model",
+                 vector_field_name: str = "embedding",
                  embedding_size=256,
                  ):
         super().__init__(host, port, db)
 
         self.dataset_title_value = dataset_title_value
         self.dataset_lang_value = dataset_lang_value
-        self.model_title_value = model_title_value
+
+        model_alias = model_title_value.split("-")[0]
+        self.model_title_value = model_alias
         self.dataset_field_name = dataset_field_name
         self.dataset_lang_field_name = dataset_lang_field_name
         self.model_field_name = model_field_name
         self.vector_field_name = vector_field_name
         self.embedding_size = embedding_size
 
-    def set_vector(self, name, vector_value):
-
+    def insert_vector(self, name, vector_value):
+        key = f"{self.doc_prefix}:{self.dataset_title_value}:{self.dataset_lang_value}:{self.model_title_value}:{name}"
         self.redis_conn.hset(
-            name,
+            key,
             mapping={self.dataset_field_name: self.dataset_title_value,
                      self.dataset_lang_field_name: self.dataset_lang_value,
                      self.model_field_name: self.model_title_value,
@@ -75,19 +78,33 @@ class RedisVector(RedisClient):
         )
 
     def delete_data(self):
+        """
+        BEWARE ! Delete all data in redis
+        :return:
+        """
         self.redis_conn.flushall()
 
-    def _set_schema(self, algorithm="HNSW"):
-        schema = (
-            TagField(self.dataset_field_name),
-            TagField(self.dataset_lang_field_name),
-            TagField(self.model_field_name),
-            VectorField(self.vector_field_name,
-                        algorithm,
-                        {"TYPE": "FLOAT64", "DIM": self.embedding_size, "DISTANCE_METRIC": "L2"}),
-        )
+    def _set_schema(self, algorithm="HNSW", distance_metric="L2"):
+        index_name = "dataset_embeddings"
+        self.doc_prefix = "dataset:"
+        try:
+            self.redis_conn.ft(index_name).info()
+            print("Index already exists ! ")
 
-        self.redis_conn.ft().create_index(schema)
+        except:
+            schema = (
+                TagField(self.dataset_field_name),
+                TagField(self.dataset_lang_field_name),
+                TagField(self.model_field_name),
+                VectorField(self.vector_field_name,
+                            algorithm,
+                            {"TYPE": "FLOAT64",
+                             "DIM": self.embedding_size,
+                             "DISTANCE_METRIC": distance_metric}),
+            )
+            definition = IndexDefinition(prefix=[self.doc_prefix], index_type=IndexType.HASH)
+
+            self.redis_conn.ft(index_name).create_index(fields=schema, definition=definition)
 
     def get_vector(self, name, key):
         """
@@ -96,12 +113,15 @@ class RedisVector(RedisClient):
         """
         return self.redis_conn.hget(name, key)
 
-    def get_similar_vectors(self, vector, num=10):
-        # 주어진 name에서 벡터 및 필요한 메타데이터 정보를 가져옵니다.
-        q = Query(
-            f'(@{self.dataset_field_name}:{self.dataset_title_value} @{self.dataset_lang_field_name}:{self.dataset_lang_value} @{self.model_field_name}:{self.model_title_value})=>[KNN {num} @{self.vector_field_name} $vec_param AS dist]').sort_by(
-            'dist')
+    def get_similar_vector_id(self, vector, num=10):
+        model_title = self.model_title_value.replace("-", "\-")
+        similarity_query = f'(@{self.dataset_field_name}:{{{{{self.dataset_title_value}}}}} ' \
+                           f'@{self.dataset_lang_field_name}:{{{{{self.dataset_lang_value}}}}} ' \
+                           f'@{self.model_field_name}:{{{{{model_title}}}}})' \
+                           f'=>[KNN {num} @{self.vector_field_name} $vec_param AS dist]'
+        q = Query(similarity_query).sort_by('dist')
         vector_params = {"vec_param": vector.tobytes()}
         res = self.redis_conn.ft().search(q, query_params=vector_params)
-
-        return res
+        # 데이터셋 아이디만 추출
+        doc_ids = [doc.id for doc in res.docs]
+        return doc_ids
