@@ -96,19 +96,12 @@ class RedisVector(RedisClient):
         """
         return self.redis_conn.hget(name, key)
 
-    def get_similar_vectors(self, name, num=10):
+    def get_similar_vectors(self, vector, num=10):
         # 주어진 name에서 벡터 및 필요한 메타데이터 정보를 가져옵니다.
-        vector = self.redis_conn.hget(name, self.vector_field_name)
-        dataset = self.redis_conn.hget(name, self.dataset_field_name).decode('utf-8')
-        language = self.redis_conn.hget(name, self.dataset_lang_field_name).decode('utf-8')
-        model = self.redis_conn.hget(name, self.model_field_name).decode('utf-8')
-
-        # 쿼리를 구성합니다.
         q = Query(
-            f'(@{self.dataset_field_name}:{dataset} @{self.dataset_lang_field_name}:{language} @{self.model_field_name}:{model})=>[KNN {num} @{self.vector_field_name} {vector} AS dist]').sort_by(
+            f'(@{self.dataset_field_name}:{self.dataset_title_value} @{self.dataset_lang_field_name}:{self.dataset_lang_value} @{self.model_field_name}:{self.model_title_value})=>[KNN {num} @{self.vector_field_name} $vec_param AS dist]').sort_by(
             'dist')
-
-        # 검색을 수행하고 결과를 반환합니다.
-        res = self.redis_conn.ft().search(q)
+        vector_params = {"vec_param": vector.tobytes()}
+        res = self.redis_conn.ft().search(q, query_params=vector_params)
 
         return res
