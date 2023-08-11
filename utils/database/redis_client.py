@@ -75,7 +75,7 @@ class RedisVector(RedisClient):
         pipeline = self.redis_conn.pipeline()
 
         for name, vector in zip(names, vectors):
-            id_key = key + "{name}"
+            id_key = key + name
             pipeline.hset(
                 id_key,
                 mapping={self.dataset_field_name: self.dataset_title_value,
