@@ -85,11 +85,6 @@ class RedisVector(RedisClient):
             self._insert_single_vector(name, vector, pipeline=pipeline)
         pipeline.execute()
 
-    def insert_vector(self, name, vector):
-        pipeline = self.redis_conn.pipeline()
-        self._insert_single_vector(name, vector, pipeline=pipeline)
-        pipeline.execute()
-
     def _insert_single_vector(self, name, vector, pipeline=None):
         document = {
             self.dataset_field_name: self.dataset_title_value,
@@ -125,7 +120,7 @@ class RedisVector(RedisClient):
                 TagField(self.model_field_name),
                 VectorField(self.vector_field_name,
                             algorithm,
-                            {"TYPE": "FLOAT64",
+                            {"TYPE": "FLOAT32",
                              "DIM": self.embedding_size,
                              "DISTANCE_METRIC": distance_metric}),
             )
