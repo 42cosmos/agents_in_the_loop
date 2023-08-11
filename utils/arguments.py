@@ -105,10 +105,6 @@ class DataTrainingArguments:
     dataset_lang: str = field(
         metadata={"help": "The language of the dataset to use (ex. en, ko ...)."}
     )
-    dataset_name_alias: str = field(
-        default=None,
-        metadata={"help": "The name of the dataset to use (via the datasets library)."}
-    )
     make_data_pool: bool = field(
         default=True,
         metadata={"help": "Whether to make data pool or not."},
@@ -148,7 +144,7 @@ class DataTrainingArguments:
         metadata={"help": "The number of processes to use for the preprocessing."},
     )
     max_seq_length: int = field(
-        default=256,
+        default=128,
         metadata={
             "help": (
                 "The maximum total input sequence length after tokenization. If set, sequences longer "

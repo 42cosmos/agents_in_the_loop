@@ -2,6 +2,8 @@ import logging
 from functools import partial
 
 import numpy as np
+
+import torch
 import datasets
 import transformers
 
@@ -9,11 +11,6 @@ import transformers.utils.logging
 from datasets import concatenate_datasets
 from dataclasses import dataclass
 from typing import Any, List, Tuple
-
-from utils import (
-    Metrics,
-    ModelArguments,
-)
 
 from transformers import (
     set_seed,
@@ -25,6 +22,9 @@ from transformers import (
     EarlyStoppingCallback,
     DataCollatorForTokenClassification
 )
+
+from .metric import Metrics
+from .arguments import ModelArguments
 
 
 @dataclass
@@ -240,6 +240,8 @@ class ModelTrainer(Trainer):
         self.model = AutoModelForTokenClassification.from_pretrained(model_name_or_path, config=self.config)
 
         self.train_dataset = self.tokenize_dataset(initial_train_dataset)
+        # 임베딩값을 DB에 업데이트하기 위해 호출, DB에 임베딩 값이 있으면 호출하지 않음
+        # self.embedding_value = self._get_embedding()
         self.eval_dataset = self.tokenize_dataset(valid_dataset, label_column_name="ner_tags")
 
         self.training_args = TrainingArguments(
@@ -289,6 +291,19 @@ class ModelTrainer(Trainer):
             compute_metrics=self.metrics.compute_metrics,
         )
 
+    def _get_embedding(self):
+        self.logger.info("Get Embedding values of initial train dataset")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        input_ids = torch.tensor(self.train_dataset["input_ids"]).to(device)
+        token_type_ids = torch.tensor(self.train_dataset["token_type_ids"]).to(device)
+        attention_mask = torch.tensor(self.train_dataset["attention_mask"]).to(device)
+
+        with torch.no_grad():
+            outputs = self.model.base_model(input_ids=input_ids,
+                                            token_type_ids=token_type_ids,
+                                            attention_mask=attention_mask).last_hidden_state
+        return outputs[:, 0, :].cpu().numpy()
+
     def get_predictions(self, dataset):
         self.logger.info("Predictions")
         tokenized_dataset = self.tokenize_dataset(dataset)
@@ -298,8 +313,7 @@ class ModelTrainer(Trainer):
                                                           label_ids=predictions.label_ids,
                                                           input_ids=tokenized_dataset["input_ids"],
                                                           metrics=predictions.metrics,
-                                                          ids=dataset["id"]
-                                                          )
+                                                          ids=dataset["id"])
 
         return custom_prediction_output
 

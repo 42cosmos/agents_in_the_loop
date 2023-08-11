@@ -17,6 +17,7 @@ from .openai import OPEN_AI_CHAT_MODELS
 
 logger = logging.getLogger(f"{__name__}")
 
+
 @dataclass
 class MessageHistory:
     agent: Agent
@@ -200,6 +201,8 @@ class MessageHistory:
 
     def summarize_batch(self, new_events_batch, config):
         pass
+
+
 #         prompt = f'''Your task is to create a concise running summary of actions and information results in the provided text, focusing on key and potentially important information to remember.
 #
 # You will receive the current summary and your latest actions. Combine them, adding relevant key information from the latest development in 1st person past tense and keeping the summary concise.
@@ -247,16 +250,19 @@ class Agent:
         load_dotenv(dotenv_path=self.config.env_path) if self.config.env_path is not None else load_dotenv()
         self.max_conversation_limit = self.config.max_conversation_limit
         self.history = MessageHistory(self)
-        self.system_prompt = None
+
+        system_prompt_key_for_redis = f"prompt:{self.role}:base_system"
+        self.system_prompt: str = self.db_client.get_values_by_key_pattern(
+            system_prompt_key_for_redis)[system_prompt_key_for_redis]
+
         self.logger = logging.getLogger("openai")
         self.logger.info(f"{role} Agent is Ready to talk ! ")
 
         self.api_key = os.getenv("OPENAI_API_KEY")
         assert self.api_key is not None, "Please set OPENAI_API_KEY in .env file"
+        openai.api_key = self.api_key
 
         self.organisation_key = os.getenv("ORGANISATION_KEY")
-
-        openai.api_key = self.api_key
         if self.organisation_key:
             openai.organization = self.organisation_key
 
@@ -278,9 +284,8 @@ class Agent:
 
 
 class Teacher(Agent):
-    def __init__(self, config, db_client=None):
+    def __init__(self, config, db_client):
         super().__init__("teacher", config, db_client)
-        self.system_prompt = "You are a maths professor at a university. You need to find out what is wrong with a student's answer and point it out to them, but you must never tell them the correct answer. You need to give them instructions to help them get the right answer."
 
     def give_feedback(self, question, student_reply):
         prompt = f"""The Question is "{question}"\n Student: {student_reply}"""
@@ -290,10 +295,9 @@ class Teacher(Agent):
 
 
 class Student(Agent):
-    def __init__(self, config, db_client=None):
+    def __init__(self, config, db_client):
         super().__init__("student", config, db_client)
-        self.system_prompt = "You are university student major in Mathematics. You are talking to your teacher."
-        self.teacher = Teacher(config=self.raw_config)
+        self.teacher = Teacher(config=self.raw_config, db_client=db_client)
 
     def talk_to_agent(self, prompt):
         initial_answer = self.create_chat_with_agent(prompt)

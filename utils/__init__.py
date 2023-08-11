@@ -9,7 +9,7 @@ from .data_loader import (
 )
 from .trainer import ModelTrainer, communicate_models_for_uncertainty, calculate_threshold, tokenize_and_align_labels
 from .throttling import Throttling, TokenThrottling
-from .utils import setup_logging, read_yaml
+from .utils import setup_logging, read_yaml, read_json
 
 from .llm.agent import Agent, Student, Teacher
 from .llm.base import (
