@@ -67,15 +67,16 @@ class RedisVector(RedisClient):
         self.vector_field_name = vector_field_name
         self.embedding_size = embedding_size
 
-    def insert_vectors(self, names, vectors):
+        self._set_schema()
 
+    def insert_vectors(self, names, vectors):
         assert len(names) == len(vectors)
 
         key = f"{self.doc_prefix}{self.dataset_title_value}:{self.dataset_lang_value}:{self.model_title_value}:"
         pipeline = self.redis_conn.pipeline()
 
         for name, vector in zip(names, vectors):
-            id_key = key + name
+            id_key = f"{key}{name}"
             pipeline.hset(
                 id_key,
                 mapping={self.dataset_field_name: self.dataset_title_value,
