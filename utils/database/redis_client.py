@@ -48,6 +48,8 @@ class RedisVector(RedisClient):
                  host: str = 'localhost',
                  port: int = 6379,
                  db=0,
+                 index_name="dataset_embeddings",
+                 doc_prefix="dataset:",
                  dataset_field_name: str = "dataset_name",
                  dataset_lang_field_name: str = "dataset_language",
                  model_field_name: str = "model",
@@ -67,34 +69,42 @@ class RedisVector(RedisClient):
         self.vector_field_name = vector_field_name
         self.embedding_size = embedding_size
 
+        self.index_name = index_name
+        self.doc_prefix = doc_prefix
         self._set_schema()
 
-    def insert_vectors(self, names, vectors):
-        assert len(names) == len(vectors)
+    def _get_id_key(self, name):
+        return f"{self.doc_prefix}{self.dataset_title_value}:{self.dataset_lang_value}:{self.model_title_value}:{name}"
 
-        key = f"{self.doc_prefix}{self.dataset_title_value}:{self.dataset_lang_value}:{self.model_title_value}:"
+    def insert_vectors(self, names, vectors):
+        assert len(names) == len(vectors), "Names and vectors must have the same length !"
+
         pipeline = self.redis_conn.pipeline()
 
         for name, vector in zip(names, vectors):
-            id_key = f"{key}{name}"
-            pipeline.hset(
-                id_key,
-                mapping={self.dataset_field_name: self.dataset_title_value,
-                         self.dataset_lang_field_name: self.dataset_lang_value,
-                         self.model_field_name: self.model_title_value,
-                         self.vector_field_name: vector.tobytes()},
-            )
+            self._insert_single_vector(name, vector, pipeline=pipeline)
         pipeline.execute()
 
-    def insert_vector(self, name, vector_value):
-        key = f"{self.doc_prefix}{self.dataset_title_value}:{self.dataset_lang_value}:{self.model_title_value}:{name}"
-        self.redis_conn.hset(
-            key,
-            mapping={self.dataset_field_name: self.dataset_title_value,
-                     self.dataset_lang_field_name: self.dataset_lang_value,
-                     self.model_field_name: self.model_title_value,
-                     self.vector_field_name: vector_value},
-        )
+    def insert_vector(self, name, vector):
+        pipeline = self.redis_conn.pipeline()
+        self._insert_single_vector(name, vector, pipeline=pipeline)
+        pipeline.execute()
+
+    def _insert_single_vector(self, name, vector, pipeline=None):
+        document = {
+            self.dataset_field_name: self.dataset_title_value,
+            self.dataset_lang_field_name: self.dataset_lang_value,
+            self.model_field_name: self.model_title_value,
+            self.vector_field_name: vector.tobytes()
+        }
+        id_key = self._get_id_key(name)
+
+        if pipeline:
+            pipeline.hset(id_key, mapping=document)
+            pipeline.ft(self.index_name).add_document(id_key, **document, replace=True)
+        else:
+            self.redis_conn.hset(id_key, mapping=document)
+            self.redis_conn.ft(self.index_name).add_document(id_key, **document, replace=True)
 
     def delete_data(self):
         """
@@ -104,10 +114,8 @@ class RedisVector(RedisClient):
         self.redis_conn.flushall()
 
     def _set_schema(self, algorithm="HNSW", distance_metric="L2"):
-        index_name = "dataset_embeddings"
-        self.doc_prefix = "dataset:"
         try:
-            self.redis_conn.ft(index_name).info()
+            self.redis_conn.ft(self.index_name).info()
             print("Index already exists ! ")
 
         except:
@@ -123,7 +131,7 @@ class RedisVector(RedisClient):
             )
             definition = IndexDefinition(prefix=[self.doc_prefix], index_type=IndexType.HASH)
 
-            self.redis_conn.ft(index_name).create_index(fields=schema, definition=definition)
+            self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
 
     def get_vector(self, name, key):
         """
