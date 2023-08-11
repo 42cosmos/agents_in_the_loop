@@ -54,7 +54,7 @@ class RedisVector(RedisClient):
                  dataset_lang_field_name: str = "dataset_language",
                  model_field_name: str = "model",
                  vector_field_name: str = "embedding",
-                 embedding_size=256,
+                 embedding_size=768,
                  ):
         super().__init__(host, port, db)
 
