@@ -81,7 +81,7 @@ class RedisVector(RedisClient):
                 mapping={self.dataset_field_name: self.dataset_title_value,
                          self.dataset_lang_field_name: self.dataset_lang_value,
                          self.model_field_name: self.model_title_value,
-                         self.vector_field_name: vector},
+                         self.vector_field_name: vector.tobytes()},
             )
         pipeline.execute()
 
