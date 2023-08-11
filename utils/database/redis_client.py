@@ -133,10 +133,9 @@ class RedisVector(RedisClient):
         return self.redis_conn.hget(name, key)
 
     def get_similar_vector_id(self, vector, num=10):
-        model_title = self.model_title_value.replace("-", "\-")
         similarity_query = f'(@{self.dataset_field_name}:{{{{{self.dataset_title_value}}}}} ' \
                            f'@{self.dataset_lang_field_name}:{{{{{self.dataset_lang_value}}}}} ' \
-                           f'@{self.model_field_name}:{{{{{model_title}}}}})' \
+                           f'@{self.model_field_name}:{{{{{self.model_title_value}}}}})' \
                            f'=>[KNN {num} @{self.vector_field_name} $vec_param AS dist]'
         q = Query(similarity_query).sort_by('dist')
         vector_params = {"vec_param": vector.tobytes()}
