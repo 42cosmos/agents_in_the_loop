@@ -44,7 +44,6 @@ class RedisVector(RedisClient):
     def __init__(self,
                  dataset_title_value: str,
                  dataset_lang_value: str,
-                 model_title_value: str,
                  host: str = 'localhost',
                  port: int = 6379,
                  db=0,
@@ -58,41 +57,42 @@ class RedisVector(RedisClient):
                  ):
         super().__init__(host, port, db)
 
+        self.dataset_field_name = dataset_field_name
         self.dataset_title_value = dataset_title_value
+
+        self.dataset_lang_field_name = dataset_lang_field_name
         self.dataset_lang_value = dataset_lang_value
 
-        model_alias = model_title_value.split("-")[0]
-        self.model_title_value = model_alias
-        self.dataset_field_name = dataset_field_name
-        self.dataset_lang_field_name = dataset_lang_field_name
         self.model_field_name = model_field_name
         self.vector_field_name = vector_field_name
+
         self.embedding_size = embedding_size
 
         self.index_name = index_name
         self.doc_prefix = doc_prefix
         self._set_schema()
 
-    def _get_id_key(self, name):
-        return f"{self.doc_prefix}{self.dataset_title_value}:{self.dataset_lang_value}:{self.model_title_value}:{name}"
+    def _get_id_key(self, model_name, data_id):
+        return f"{self.doc_prefix}{self.dataset_title_value}:{self.dataset_lang_value}:{model_name}:{data_id}"
 
-    def insert_vectors(self, names, vectors):
-        assert len(names) == len(vectors), "Names and vectors must have the same length !"
+    def insert_vectors(self, model_name: str, ids, vectors):
+        assert len(ids) == len(vectors), "Names and vectors must have the same length !"
 
         pipeline = self.redis_conn.pipeline()
 
-        for name, vector in zip(names, vectors):
-            self._insert_single_vector(name, vector, pipeline=pipeline)
+        for id_, vector in zip(ids, vectors):
+            self._insert_single_vector(model_name=model_name, data_id=id_,
+                                       vector=vector, pipeline=pipeline)
         pipeline.execute()
 
-    def _insert_single_vector(self, name, vector, pipeline=None):
+    def _insert_single_vector(self, model_name, data_id, vector, pipeline=None):
         document = {
             self.dataset_field_name: self.dataset_title_value,
             self.dataset_lang_field_name: self.dataset_lang_value,
-            self.model_field_name: self.model_title_value,
+            self.model_field_name: model_name,
             self.vector_field_name: vector.tobytes()
         }
-        id_key = self._get_id_key(name)
+        id_key = self._get_id_key(model_name, data_id)
 
         if pipeline:
             pipeline.hset(id_key, mapping=document)
@@ -135,10 +135,10 @@ class RedisVector(RedisClient):
         """
         return self.redis_conn.hget(name, key)
 
-    def get_similar_vector_id(self, vector, num=10):
+    def get_similar_vector_id(self, model_name, vector, num=10):
         similarity_query = f'(@{self.dataset_field_name}:{{{{{self.dataset_title_value}}}}} ' \
                            f'@{self.dataset_lang_field_name}:{{{{{self.dataset_lang_value}}}}} ' \
-                           f'@{self.model_field_name}:{{{{{self.model_title_value}}}}})' \
+                           f'@{self.model_field_name}:{{{{{model_name}}}}})' \
                            f'=>[KNN {num} @{self.vector_field_name} $vec_param AS dist]'
         q = Query(similarity_query).sort_by('dist')
         vector_params = {"vec_param": vector.tobytes()}
