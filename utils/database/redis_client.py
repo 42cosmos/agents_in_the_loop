@@ -54,6 +54,7 @@ class RedisVector(RedisClient):
                  model_field_name: str = "model",
                  vector_field_name: str = "embedding",
                  embedding_size=768,
+                 remove_history=False
                  ):
         super().__init__(host, port, db)
 
@@ -70,6 +71,9 @@ class RedisVector(RedisClient):
 
         self.index_name = index_name
         self.doc_prefix = doc_prefix
+
+        if remove_history:
+            self.delete_data()
         self._set_schema()
 
     def _get_id_key(self, model_name, data_id):
