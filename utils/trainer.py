@@ -1,3 +1,4 @@
+import copy
 import logging
 from functools import partial
 
@@ -240,8 +241,7 @@ class ModelTrainer(Trainer):
         self.model = AutoModelForTokenClassification.from_pretrained(model_name_or_path, config=self.config)
 
         self.train_dataset = self.tokenize_dataset(initial_train_dataset)
-        # 임베딩값을 DB에 업데이트하기 위해 호출, DB에 임베딩 값이 있으면 호출하지 않음
-        # self.embedding_value = self._get_embedding()
+        self.copy_of_init_train_dataset = copy.deepcopy(self.train_dataset)
         self.eval_dataset = self.tokenize_dataset(valid_dataset, label_column_name="ner_tags")
 
         self.training_args = TrainingArguments(
@@ -291,18 +291,18 @@ class ModelTrainer(Trainer):
             compute_metrics=self.metrics.compute_metrics,
         )
 
-    def _get_embedding(self):
+    def get_embedding(self, dataset):
         self.logger.info("Get Embedding values of initial train dataset")
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        input_ids = torch.tensor(self.train_dataset["input_ids"]).to(device)
-        token_type_ids = torch.tensor(self.train_dataset["token_type_ids"]).to(device)
-        attention_mask = torch.tensor(self.train_dataset["attention_mask"]).to(device)
+        input_ids = torch.tensor(dataset["input_ids"]).to(device)
+        token_type_ids = torch.tensor(dataset["token_type_ids"]).to(device)
+        attention_mask = torch.tensor(dataset["attention_mask"]).to(device)
 
         with torch.no_grad():
             outputs = self.model.base_model(input_ids=input_ids,
                                             token_type_ids=token_type_ids,
                                             attention_mask=attention_mask).last_hidden_state
-        return outputs[:, 0, :].cpu().numpy()
+        return outputs[:, 0, :].cpu().numpy().astype(np.float32)
 
     def get_predictions(self, dataset):
         self.logger.info("Predictions")
