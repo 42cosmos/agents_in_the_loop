@@ -1,5 +1,12 @@
+import logging
+
 import redis
-from redis.commands.search.field import VectorField, TagField, NumericField, TextField
+from redis.commands.search.field import (
+    VectorField,
+    TagField,
+    NumericField,
+    TextField
+)
 from redis.commands.search.query import Query
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 
@@ -9,7 +16,11 @@ class RedisClient:
         self.redis_conn = redis.Redis(host=host, port=port, db=db)
 
     def get_all_keys(self, pattern='*'):
-        return [key.decode('utf-8') for key in self.redis_conn.keys(pattern)]
+        try:
+            return [key.decode('utf-8') for key in self.redis_conn.keys(pattern)]
+        except Exception as e:
+            logging.error(f"Error in get_all_keys: {e}")
+            raise
 
     def get_values_by_key_pattern(self, pattern):
         keys = self.get_all_keys(pattern)
@@ -37,7 +48,11 @@ class RedisClient:
         return [value.decode('utf-8') for value in self.redis_conn.lrange(key, 0, -1)]
 
     def delete_key(self, key):
-        return self.redis_conn.delete(key)
+        try:
+            return self.redis_conn.delete(key)
+        except Exception as e:
+            logging.error(f"Error in delete_key: {e}")
+            raise
 
 
 class RedisVector(RedisClient):
@@ -110,12 +125,16 @@ class RedisVector(RedisClient):
         BEWARE ! Delete all data in redis
         :return:
         """
-        self.redis_conn.flushall()
+        try:
+            self.redis_conn.flushall()
+        except Exception as e:
+            logging.error(f"Error in delete_data: {e}")
+            raise
 
     def _set_schema(self, algorithm="HNSW", distance_metric="L2"):
         try:
             self.redis_conn.ft(self.index_name).info()
-            print("Index already exists ! ")
+            logging.info(f"{self.index_name} Index already exists ! ")
 
         except:
             schema = (
@@ -131,13 +150,18 @@ class RedisVector(RedisClient):
             definition = IndexDefinition(prefix=[self.doc_prefix], index_type=IndexType.HASH)
 
             self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
+            logging.info(f"Index {self.index_name} created !")
 
     def get_vector(self, name, key):
         """
         :param name: 데이터베이스 key 값
         :param key: 스키마의 key 값
         """
-        return self.redis_conn.hget(name, key)
+        try:
+            return self.redis_conn.hget(name, key)
+        except Exception as e:
+            logging.error(f"Error in get_vector: {e}")
+            raise
 
     def get_similar_vector_id(self, model_name, vector, num=10):
         similarity_query = f'(@{self.dataset_field_name}:{{{{{self.dataset_title_value}}}}} ' \
@@ -146,7 +170,57 @@ class RedisVector(RedisClient):
                            f'=>[KNN {num} @{self.vector_field_name} $vec_param AS dist]'
         q = Query(similarity_query).sort_by('dist')
         vector_params = {"vec_param": vector.tobytes()}
-        res = self.redis_conn.ft().search(q, query_params=vector_params)
+        try:
+            res = self.redis_conn.ft().search(q, query_params=vector_params)
+        except Exception as e:
+            logging.error(f"Error in get_similar_vector_id: {e}")
+            raise
         # 데이터셋 아이디만 추출
         doc_ids = [doc.id for doc in res.docs]
         return doc_ids
+
+
+class RedisPrompt(RedisClient):
+    def __init__(self,
+                 host: str = 'localhost',
+                 port: int = 6379,
+                 db=0,
+                 index_name="prompt_index",
+                 doc_prefix="prompt:",
+                 prompt_field_name="prompt"):
+
+        self.index_name = index_name
+        self.doc_prefix = doc_prefix
+        self.prompt_field_name = prompt_field_name
+        super().__init__(host, port, db)
+
+    def set_prompt(self, data_id, prompt: str):
+        prompt_key = f"{self.doc_prefix}:{data_id}"
+        document = {
+            self.prompt_field_name: prompt
+        }
+        try:
+            self.redis_conn.hset(prompt_key, mapping=document)
+            self.redis_conn.ft(self.index_name).add_document(prompt_key, **document, replace=True)
+            logging.info(f"Prompt {prompt_key} added !")
+        except Exception as e:
+            logging.error(f"Error in set_prompt : {e}")
+            raise
+
+    def set_prompt_schema(self):
+        try:
+            self.redis_conn.ft(self.index_name).info()
+            logging.info(f"{self.index_name} Index already exists ! ")
+        except:
+            schema = (TextField(self.prompt_field_name),)
+            definition = IndexDefinition(prefix=[self.doc_prefix], index_type=IndexType.HASH)
+
+            self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
+            logging.info(f"Index {self.index_name} created !")
+
+    def get_prompt(self, name, key):
+        try:
+            return self.redis_conn.hget(name, key)
+        except Exception as e:
+            logging.error(f"Error in get_prompt : {e}")
+            raise
