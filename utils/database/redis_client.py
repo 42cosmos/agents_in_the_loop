@@ -61,6 +61,19 @@ class RedisClient:
             logging.error(f"Error in delete_key: {e}")
             raise
 
+    def delete_documents_by_index_name(self, index_name):
+        """
+        BEWARE ! Delete all data in redis
+        """
+        try:
+            results = self.redis_conn.ft(index_name).search(Query('*'))
+            for doc in results.docs:
+                self.redis_conn.delete(doc.id)
+            logging.info(f"Deleted {len(results.docs)} documents from {index_name}")
+        except Exception as e:
+            logging.error(f"Error in delete_documents_by_index_name: {e}")
+            raise
+
 
 class RedisVector(RedisClient):
     def __init__(self,
@@ -95,8 +108,8 @@ class RedisVector(RedisClient):
         self.doc_prefix = doc_prefix
 
         if remove_history:
-            self.delete_data()
-        self._set_schema()
+            self.delete_documents_by_index_name(self.index_name)
+        self.set_schema()
 
     def _get_id_key(self, model_name, data_id):
         return f"{self.doc_prefix}{self.dataset_title_value}:{self.dataset_lang_value}:{model_name}:{data_id}"
@@ -199,7 +212,10 @@ class RedisPrompt(RedisClient):
         self.index_name = index_name
         self.doc_prefix = doc_prefix
         self.prompt_field_name = prompt_field_name
-        super().__init__(host, port, db)
+
+        if remove_history:
+            self.delete_documents_by_index_name(self.index_name)
+        self.set_prompt_schema()
 
     def set_prompt(self, data_id, prompt: str):
         prompt_key = f"{self.doc_prefix}:{data_id}"
