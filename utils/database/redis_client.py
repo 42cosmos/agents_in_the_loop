@@ -221,14 +221,17 @@ class RedisPrompt(RedisClient):
             self.redis_conn.ft(self.index_name).add_document(prompt_key, **document, replace=True)
             logging.info(f"Prompt {prompt_key} added !")
         except Exception as e:
-            logging.error(f"Error in set_prompt : {e}")
+            db_info = self.get_information_by_index_name(self.index_name)
+            num_docs, num_failure = db_info["num_docs"], db_info["hash_indexing_failures"]
+            logging.error(f"Error in set_prompt : {e}, num_docs : {num_docs}, num_failure : {num_failure}")
             raise
 
     def set_prompt_schema(self):
         try:
             self.redis_conn.ft(self.index_name).info()
             logging.info(f"{self.index_name} Index already exists ! ")
-        except:
+
+        except Exception as e:
             schema = (TextField(self.prompt_field_name),)
             definition = IndexDefinition(prefix=[self.doc_prefix], index_type=IndexType.HASH)
 
