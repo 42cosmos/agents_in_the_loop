@@ -196,7 +196,10 @@ class RedisPrompt(RedisClient):
                  db=0,
                  index_name="prompt_index",
                  doc_prefix="prompt:",
-                 prompt_field_name="prompt"):
+                 prompt_field_name="prompt",
+                 remove_history=False):
+
+        super().__init__(host, port, db)
 
         self.index_name = index_name
         self.doc_prefix = doc_prefix
