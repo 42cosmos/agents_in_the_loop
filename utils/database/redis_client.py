@@ -140,18 +140,7 @@ class RedisVector(RedisClient):
             self.redis_conn.hset(id_key, mapping=document)
             self.redis_conn.ft(self.index_name).add_document(id_key, **document, replace=True)
 
-    def delete_data(self):
-        """
-        BEWARE ! Delete all data in redis
-        :return:
-        """
-        try:
-            self.redis_conn.flushall()
-        except Exception as e:
-            logging.error(f"Error in delete_data: {e}")
-            raise
-
-    def _set_schema(self, algorithm="HNSW", distance_metric="L2"):
+    def set_schema(self, algorithm="HNSW", distance_metric="L2"):
         try:
             self.redis_conn.ft(self.index_name).info()
             logging.info(f"{self.index_name} Index already exists ! ")
@@ -172,13 +161,13 @@ class RedisVector(RedisClient):
             self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
             logging.info(f"Index {self.index_name} created !")
 
-    def get_vector(self, name, key):
+    def get_vector(self, data_id, field_name):
         """
-        :param name: 데이터베이스 key 값
-        :param key: 스키마의 key 값
+        :param data_id: 데이터베이스 key 값
+        :param field_name: 스키마의 key 값
         """
         try:
-            return self.redis_conn.hget(name, key)
+            return self.redis_conn.hget(data_id, field_name)
         except Exception as e:
             logging.error(f"Error in get_vector: {e}")
             raise
@@ -218,10 +207,15 @@ class RedisPrompt(RedisClient):
         self.set_prompt_schema()
 
     def set_prompt(self, data_id, prompt: str):
-        prompt_key = f"{self.doc_prefix}:{data_id}"
+        """
+        :param data_id: doc_prefix is already included, you just need to pass the id
+        :param prompt: prompt text
+        """
+        prompt_key = f"{self.doc_prefix}{data_id}"
         document = {
-            self.prompt_field_name: prompt
+            self.prompt_field_name: prompt.strip()
         }
+
         try:
             self.redis_conn.hset(prompt_key, mapping=document)
             self.redis_conn.ft(self.index_name).add_document(prompt_key, **document, replace=True)
@@ -241,9 +235,11 @@ class RedisPrompt(RedisClient):
             self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
             logging.info(f"Index {self.index_name} created !")
 
-    def get_prompt(self, name, key):
+    def get_prompt(self, data_id, field_name):
+        data_id_for_search = f"{self.doc_prefix}{data_id}"
         try:
-            return self.redis_conn.hget(name, key)
+            return self.redis_conn.hget(data_id_for_search, field_name)
+
         except Exception as e:
             logging.error(f"Error in get_prompt : {e}")
             raise
