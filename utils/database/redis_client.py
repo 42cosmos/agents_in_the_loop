@@ -15,15 +15,22 @@ class RedisClient:
     def __init__(self, host='localhost', port=6379, db=0):
         self.redis_conn = redis.Redis(host=host, port=port, db=db)
 
-    def get_all_keys(self, pattern='*'):
+    def get_information_by_index_name(self, index_name):
+        try:
+            return self.redis_conn.ft(index_name).info()
+        except Exception as e:
+            logging.error(f"Error in get_information_by_index_name: {e}")
+            raise
+
+    def get_all_key_by_pattern(self, pattern='*'):
         try:
             return [key.decode('utf-8') for key in self.redis_conn.keys(pattern)]
         except Exception as e:
-            logging.error(f"Error in get_all_keys: {e}")
+            logging.error(f"Error in get_all_key_by_pattern: {e}")
             raise
 
     def get_values_by_key_pattern(self, pattern):
-        keys = self.get_all_keys(pattern)
+        keys = self.get_all_key_by_pattern(pattern)
         return {key: self.redis_conn.get(key).decode('utf-8') if self.redis_conn.get(key) else None for key in keys}
 
     def set_value(self, key, value):
