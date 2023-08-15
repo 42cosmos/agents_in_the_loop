@@ -195,26 +195,34 @@ class RedisPrompt(RedisClient):
                  port: int = 6379,
                  db=0,
                  index_name="prompt_index",
-                 doc_prefix="prompt:",
                  prompt_field_name="prompt",
                  remove_history=False):
 
         super().__init__(host, port, db)
 
         self.index_name = index_name
-        self.doc_prefix = doc_prefix
         self.prompt_field_name = prompt_field_name
+        self.doc_prefixes: list = ["prompt:", "memory:"]
 
         if remove_history:
             self.delete_documents_by_index_name(self.index_name)
         self.set_prompt_schema()
 
-    def set_prompt(self, data_id, prompt: str):
+    @staticmethod
+    def set_data_id(id_, doc_prefix="prompt"):
+        doc_prefix = doc_prefix.lower()
+        assert doc_prefix in ["prompt", "memory"], "doc_prefix must be either prompt or memory !"
+        set_doc_prefix = doc_prefix if doc_prefix.endswith(":") else doc_prefix + ":"
+
+        return f"{set_doc_prefix}{id_}"
+
+    def set_prompt(self, data_id, prompt: str, doc_prefix="prompt"):
         """
+        :param doc_prefix: prefix of document key, (prompt or memory)
         :param data_id: doc_prefix is already included, you just need to pass the id
         :param prompt: prompt text
         """
-        prompt_key = f"{self.doc_prefix}{data_id}"
+        prompt_key = self.set_data_id(data_id, doc_prefix)
         document = {
             self.prompt_field_name: prompt.strip()
         }
@@ -235,16 +243,22 @@ class RedisPrompt(RedisClient):
             logging.info(f"{self.index_name} Index already exists ! ")
 
         except Exception as e:
-            schema = (TextField(self.prompt_field_name),)
-            definition = IndexDefinition(prefix=[self.doc_prefix], index_type=IndexType.HASH)
+            schema = (
+                TextField(self.prompt_field_name)
+            )
+            definition = IndexDefinition(prefix=self.doc_prefixes, index_type=IndexType.HASH)
 
             self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
             logging.info(f"Index {self.index_name} created !")
 
-    def get_prompt(self, data_id, field_name):
-        data_id_for_search = f"{self.doc_prefix}{data_id}"
+    def get_prompt(self, data_id, field_name, doc_prefix="prompt"):
+        data_id_for_search = self.set_data_id(data_id, doc_prefix)
         try:
-            return self.redis_conn.hget(data_id_for_search, field_name)
+            prompt_value = self.redis_conn.hget(data_id_for_search, field_name).decode("utf-8")
+            if prompt_value:
+                return prompt_value
+            else:
+                logging.info(f"Prompt {data_id} not found !")
 
         except Exception as e:
             logging.error(f"Error in get_prompt : {e}")
