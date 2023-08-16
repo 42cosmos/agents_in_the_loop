@@ -236,7 +236,6 @@ class Agent:
 
         system_prompt_key_for_redis = f"{self.role}:base_system"
         self.system_prompt: str = self.db_client.get_prompt(data_id=system_prompt_key_for_redis,
-                                                            field_name="prompt",
                                                             doc_prefix="prompt")
 
         self.logger = logging.getLogger("openai")
