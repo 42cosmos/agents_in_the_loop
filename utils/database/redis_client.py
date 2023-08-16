@@ -1,4 +1,6 @@
+import json
 import logging
+from typing import Any, List, Dict
 
 import redis
 from redis.commands.search.field import (
@@ -194,48 +196,67 @@ class RedisPrompt(RedisClient):
                  host: str = 'localhost',
                  port: int = 6379,
                  db=0,
-                 index_name="prompt_index",
+                 index_name="conversation",
                  prompt_field_name="prompt",
+                 doc_prefixes=None,
                  remove_history=False):
 
         super().__init__(host, port, db)
 
+        if doc_prefixes is None:
+            doc_prefixes = ["memory", "prompt"]
+
         self.index_name = index_name
         self.prompt_field_name = prompt_field_name
-        self.doc_prefixes: list = ["prompt:", "memory:"]
+        self.doc_prefixes = doc_prefixes
 
         if remove_history:
             self.delete_documents_by_index_name(self.index_name)
         self.set_prompt_schema()
 
-    @staticmethod
-    def set_data_id(id_, doc_prefix="prompt"):
+    def get_prompt_id(self, id_, doc_prefix="memory"):
         doc_prefix = doc_prefix.lower()
-        assert doc_prefix in ["prompt", "memory"], "doc_prefix must be either prompt or memory !"
+        assert doc_prefix in self.doc_prefixes, "doc_prefix must be memory or prompt!"
         set_doc_prefix = doc_prefix if doc_prefix.endswith(":") else doc_prefix + ":"
 
         return f"{set_doc_prefix}{id_}"
 
-    def set_prompt(self, data_id, prompt: str, doc_prefix="prompt"):
+    def set_prompts(self, prompt_datum: List[Dict], doc_prefix="memory"):
         """
-        :param doc_prefix: prefix of document key, (prompt or memory)
-        :param data_id: doc_prefix is already included, you just need to pass the id
-        :param prompt: prompt text
+        :param doc_prefix: memory or prompt
+        :param prompt_datum: dictionaries in List with keys prompt, initial_answer, feedback, final_answer
         """
-        prompt_key = self.set_data_id(data_id, doc_prefix)
-        document = {
-            self.prompt_field_name: prompt.strip()
-        }
-
         try:
-            self.redis_conn.hset(prompt_key, mapping=document)
-            self.redis_conn.ft(self.index_name).add_document(prompt_key, **document, replace=True)
-            logging.info(f"Prompt {prompt_key} added !")
+            pipeline = self.redis_conn.pipeline()
+
+            for dict_data in prompt_datum:
+                # TODO: set_prompt로 들어오는 datum 재정의
+                data_id = dict_data["id"] # memory:student:{data_id}:{#}
+                data_id = self.get_prompt_id(data_id, doc_prefix)
+                prompt_data = dict_data["llm_answer"]
+
+                self._set_single_prompt(data_id=data_id,
+                                        prompt_data=prompt_data,
+                                        doc_prefix=doc_prefix,
+                                        pipeline=pipeline)
+
+
         except Exception as e:
             db_info = self.get_information_by_index_name(self.index_name)
             num_docs, num_failure = db_info["num_docs"], db_info["hash_indexing_failures"]
             logging.error(f"Error in set_prompt : {e}, num_docs : {num_docs}, num_failure : {num_failure}")
             raise
+
+    def _set_single_prompt(self, data_id, prompt_data: dict, doc_prefix="memory", pipeline=None):
+        prompt_key = self.get_prompt_id(data_id, doc_prefix)
+        serialised_data = json.dumps(prompt_data)
+        if pipeline:
+            pipeline.set(prompt_key, serialised_data)
+            pipeline.ft(self.index_name).add_document(prompt_key, **prompt_data, replace=True)
+        else:
+            self.redis_conn.set(prompt_key, serialised_data)
+            self.redis_conn.ft(self.index_name).add_document(prompt_key, **prompt_data, replace=True)
+            logging.info(f"Prompt {prompt_key} added !")
 
     def set_prompt_schema(self):
         try:
@@ -244,22 +265,34 @@ class RedisPrompt(RedisClient):
 
         except Exception as e:
             schema = (
-                TextField(self.prompt_field_name)
+                TextField(self.prompt_field_name),
             )
-            definition = IndexDefinition(prefix=self.doc_prefixes, index_type=IndexType.HASH)
+            definition = IndexDefinition(prefix=[self.doc_prefixes], index_type=IndexType.HASH)
 
             self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
             logging.info(f"Index {self.index_name} created !")
 
-    def get_prompt(self, data_id, field_name, doc_prefix="prompt"):
-        data_id_for_search = self.set_data_id(data_id, doc_prefix)
+    def get_prompt(self, data_id, doc_prefix="memory"):
+        data_id_for_search = self.get_prompt_id(data_id, doc_prefix)
         try:
-            prompt_value = self.redis_conn.hget(data_id_for_search, field_name).decode("utf-8")
+            prompt_value = self.redis_conn.hget(data_id_for_search, self.prompt_field_name)
             if prompt_value:
-                return prompt_value
+                return prompt_value.decode("utf-8")
             else:
                 logging.info(f"Prompt {data_id} not found !")
 
         except Exception as e:
             logging.error(f"Error in get_prompt : {e}")
+            raise
+
+    def get_prompt_json(self, data_id, doc_prefix="memory"):
+        data_id_for_search = self.get_prompt_id(data_id, doc_prefix)
+        try:
+            serialised_data = self.redis_conn.get(data_id_for_search)
+            if serialised_data:
+                return json.loads(serialised_data)  # 문자열을 다시 JSON 객체로 변환
+            else:
+                logging.info(f"Prompt {data_id} not found !")
+        except Exception as e:
+            logging.error(f"Error in get_prompt_json : {e}")
             raise
