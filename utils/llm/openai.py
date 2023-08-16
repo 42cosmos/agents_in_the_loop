@@ -3,7 +3,6 @@ import logging
 from typing import Optional, List
 from dataclasses import dataclass
 
-# from .agent import Agent
 from .base import ChatModelInfo, MessageDict
 
 from openai.openai_object import OpenAIObject
@@ -20,42 +19,49 @@ OPEN_AI_CHAT_MODELS = {
             prompt_token_cost=0.0015,
             completion_token_cost=0.002,
             max_tokens=4096,
+            temperature=1,
         ),
         ChatModelInfo(
             name="gpt-3.5-turbo-0613",
             prompt_token_cost=0.0015,
             completion_token_cost=0.002,
             max_tokens=4096,
+            temperature=1,
         ),
         ChatModelInfo(
             name="gpt-3.5-turbo-16k-0613",
             prompt_token_cost=0.003,
             completion_token_cost=0.004,
             max_tokens=16384,
+            temperature=1,
         ),
         ChatModelInfo(
             name="gpt-4-0314",
             prompt_token_cost=0.03,
             completion_token_cost=0.06,
             max_tokens=8192,
+            temperature=1,
         ),
         ChatModelInfo(
             name="gpt-4-0613",
             prompt_token_cost=0.03,
             completion_token_cost=0.06,
             max_tokens=8192,
+            temperature=1,
         ),
         ChatModelInfo(
             name="gpt-4-32k-0314",
             prompt_token_cost=0.06,
             completion_token_cost=0.12,
             max_tokens=32768,
+            temperature=1,
         ),
         ChatModelInfo(
             name="gpt-4-32k-0613",
             prompt_token_cost=0.06,
             completion_token_cost=0.12,
             max_tokens=32768,
+            temperature=1,
         ),
     ]
 }
@@ -112,29 +118,29 @@ class OpenAIFunctionSpec:
         }
 
 
-def get_openai_command_specs(agent) -> list[OpenAIFunctionSpec]:
-    """Get OpenAI-consumable function specs for the agent's available commands.
-    see https://platform.openai.com/docs/guides/gpt/function-calling
-    """
-    if not agent.config.openai_functions:
-        return []
-
-    return [
-        OpenAIFunctionSpec(
-            name=command.name,
-            description=command.description,
-            parameters={
-                param.name: ParameterSpec(
-                    name=param.name,
-                    type=param.type,
-                    required=param.required,
-                    description=param.description,
-                )
-                for param in command.parameters
-            },
-        )
-        for command in agent.command_registry.commands.values()  # FIX
-    ]
+# def get_openai_command_specs(agent: Agent) -> list[OpenAIFunctionSpec]:
+#     """Get OpenAI-consumable function specs for the agent's available commands.
+#     see https://platform.openai.com/docs/guides/gpt/function-calling
+#     """
+#     if not agent.config.openai_functions:
+#         return []
+#
+#     return [
+#         OpenAIFunctionSpec(
+#             name=command.name,
+#             description=command.description,
+#             parameters={
+#                 param.name: ParameterSpec(
+#                     name=param.name,
+#                     type=param.type,
+#                     required=param.required,
+#                     description=param.description,
+#                 )
+#                 for param in command.parameters
+#             },
+#         )
+#         for command in agent.command_registry.commands.values()
+#     ]
 
 
 def retry_api(
@@ -217,3 +223,29 @@ def create_chat_completion(
     if not hasattr(completion, "error"):
         logger.debug(f"Response: {completion}")
     return completion
+
+
+# temp variable
+# TODO: remove this and use get_openai_command_specs above...
+ner_gpt_function = {
+    "name": "find_ner",
+    "description": "Extracts named entities and their categories from the input text.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "entities": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "word": {"type": "string",
+                                 "description": "A word extracted from text."},
+                        "entity": {"type": "string",
+                                   "description": "Category of the named entity."}
+                    }
+                }
+            }
+        }
+    },
+    "required": ["entities"]
+}
