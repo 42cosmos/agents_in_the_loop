@@ -5,18 +5,27 @@ import os
 import copy
 import logging
 import logging.config
+from typing import List
+
+from colorama import Fore
 from dotenv import load_dotenv
 from dataclasses import dataclass, field
 
 import openai
 
 from .chat import chat_with_agent
-from .base import Message, MessageRole, MessageType
+from .base import Message, MessageRole, MessageType, ChatModelResponse
 from .token_counter import count_string_tokens
-from .openai import OPEN_AI_CHAT_MODELS
 
 logger = logging.getLogger(f"{__name__}")
 
+LANGUAGES = {
+    "en": "english",
+    "ko": "korean",
+    "ja": "japanese",
+    "pl": "polish",
+    "id": "indonesian",
+}
 
 @dataclass
 class MessageHistory:
@@ -203,60 +212,38 @@ class MessageHistory:
         pass
 
 
-#         prompt = f'''Your task is to create a concise running summary of actions and information results in the provided text, focusing on key and potentially important information to remember.
-#
-# You will receive the current summary and your latest actions. Combine them, adding relevant key information from the latest development in 1st person past tense and keeping the summary concise.
-#
-# Summary So Far:
-# """
-# {self.summary}
-# """
-#
-# Latest Development:
-# """
-# {new_events_batch or "Nothing new happened."}
-# """
-# '''
-#
-#         prompt = ChatSequence.for_model(
-#             config.fast_llm_model, [Message("user", prompt)]
-#         )
-#         self.agent.log_cycle_handler.log_cycle(
-#             self.agent.ai_name,
-#             self.agent.created_at,
-#             self.agent.cycle_count,
-#             prompt.raw(),
-#             PROMPT_SUMMARY_FILE_NAME,
-#         )
-#
-#         self.summary = create_chat_completion(prompt, config).content
-#
-#         self.agent.log_cycle_handler.log_cycle(
-#             self.agent.ai_name,
-#             self.agent.created_at,
-#             self.agent.cycle_count,
-#             self.summary,
-#             SUMMARY_FILE_NAME,
-#         )
-
-
 class Agent:
-    def __init__(self, role, config, db_client=None):
+    def __init__(self, role,
+                 config,
+                 db_client,
+                 dataset_name: str = "wikiann",
+                 dataset_lang: str = "en"):
+
         self.role = role
         self.raw_config = config
         self.config = config[role]
         self.db_client = db_client
+        self.dataset_name = dataset_name
+
+        assert dataset_lang in LANGUAGES, f"dataset_lang should be one of {LANGUAGES.keys()}"
+        self.dataset_lang = LANGUAGES[dataset_lang]
+
+        self.api_cost_accumulated = 0.0
 
         load_dotenv(dotenv_path=self.config.env_path) if self.config.env_path is not None else load_dotenv()
         self.max_conversation_limit = self.config.max_conversation_limit
         self.history = MessageHistory(self)
 
-        system_prompt_key_for_redis = f"prompt:{self.role}:base_system"
-        self.system_prompt: str = self.db_client.get_values_by_key_pattern(
-            system_prompt_key_for_redis)[system_prompt_key_for_redis]
+        system_prompt_key_for_redis = f"{self.role}:base_system"
+        self.system_prompt: str = self.db_client.get_prompt(data_id=system_prompt_key_for_redis,
+                                                            field_name="prompt",
+                                                            doc_prefix="prompt")
 
         self.logger = logging.getLogger("openai")
-        self.logger.info(f"{role} Agent is Ready to talk ! ")
+        if self.system_prompt is None:
+            raise ValueError(f"Please set system_prompt for {self.role} agent")
+
+        self.logger.info(f"{Fore.YELLOW}{role.upper()} Agent{Fore.RESET} is Ready to talk !")
 
         self.api_key = os.getenv("OPENAI_API_KEY")
         assert self.api_key is not None, "Please set OPENAI_API_KEY in .env file"
@@ -271,12 +258,23 @@ class Agent:
         agent_reply = self.create_chat_with_agent(prompt)
         return agent_reply
 
-    def create_chat_with_agent(self, prompt):
+    def get_cost(self, answers: List[ChatModelResponse]):
+        cost = 0.0
+        for answer in answers:
+            api_cost = answer.model_info.prompt_token_cost + answer.model_info.completion_token_cost
+            cost += api_cost
+            self.api_cost_accumulated += api_cost
+        logging.info(
+            f"This conversation {len(answers)} cost is {cost}, Total cost of this conversation is {self.api_cost_accumulated} tokens")
+
+    def create_chat_with_agent(self, prompt, use_function_call=False):
         assistant_reply = chat_with_agent(
             agent=self,
             system_prompt=self.system_prompt,
-            triggering_prompt=prompt
+            triggering_prompt=prompt,
+            use_function_call=use_function_call
         )
+        self.get_cost([assistant_reply])
         return assistant_reply
 
     def get_memories(self):
@@ -288,24 +286,66 @@ class Teacher(Agent):
         super().__init__("teacher", config, db_client)
 
     def give_feedback(self, question, student_reply):
-        prompt = f"""The Question is "{question}"\n Student: {student_reply}"""
-        assistant_reply = self.create_chat_with_agent(prompt)
+        feedback_history = self.db_client.get_all_key_by_pattern(f"memory:teacher:{data_id}*")
+        if feedback_history:
+            feedback_history = [self.db_client.get_prompt(data_id=key,
+                                                          field_name="prompt",
+                                                          doc_prefix="memory")
+                                for key in feedback_history]
+            feedback_history = "\n".join(feedback_history)
+        # TODO: 비슷한 문제에 너는 다음과 같이 대답했다. 이를 종합해 항상 학생에게 더 나은 피드백을 제공하라.
+
+        prompt = f"""The sentence in which the entity should be found: "{question}"
+Student answer: "{student_reply}" """.strip()
+        assistant_reply = self.create_chat_with_agent(prompt, use_function_call=False)
         logging.info("Teacher Feedback is given...")
         return assistant_reply
 
 
 class Student(Agent):
-    def __init__(self, config, db_client):
-        super().__init__("student", config, db_client)
+    def __init__(self, config, db_client, dataset_name, dataset_lang):
+        super().__init__("student", config, db_client, dataset_name, dataset_lang)
         self.teacher = Teacher(config=self.raw_config, db_client=db_client)
 
-    def talk_to_agent(self, prompt):
-        initial_answer = self.create_chat_with_agent(prompt)
-        feedback = self.teacher.give_feedback(initial_answer, prompt)
-        final_answer = self._finalise_reply(prompt, initial_answer, feedback)
-        return final_answer
+    def _get_basic_prompt(self):
+        information = self.db_client.get_prompt(data_id=f"{self.dataset_name}:{self.dataset_lang}",
+                                                doc_prefix="prompt")
+
+        warning_sign = self.db_client.get_prompt(data_id=f"warning",
+                                                 doc_prefix="prompt")
+
+        return f"{information}\n{warning_sign}"
+
+    def _add_example(self, prompt, similar_example):
+        basic_information = self._get_basic_prompt()
+        if similar_example:
+            return f"{basic_information}\n\n{similar_example}\n{prompt}"
+
+        # TODO: similar_example이 없을 때, 기본 예제를 넣는 방식으로 변경
+        return f"{basic_information}\n\n{similar_example}\n{prompt}"
+
+    def talk_to_agent(self,
+                      user_sentence,
+                      similar_example,
+                      data_id, get_feedback=False, save_db=True):
+
+        prompt = self._add_example(user_sentence, data_id)
+        answers = [self.create_chat_with_agent(prompt, use_function_call=True)]  # student 1
+        if get_feedback:
+            feedback = self.teacher.give_feedback(answers[0], prompt)  # teacher 1
+            final_answer = self._finalise_reply(prompt, answers[0], feedback)  # student 2
+
+            answers.extend([feedback, final_answer])
+            # self.get_cost(all_answer)
+        if save_db:
+            self.db_client.set_prompts(prompt_datum=answers, data_id=data_id)
+
+        return answers[-1]
 
     def _finalise_reply(self, question, initial_reply, teacher_feedback):
         combined_prompt = f"This Problem ({question})'s your initial answer is: {initial_reply}\n Teacher's feedback: {teacher_feedback}\n Please write your final answer. but you have to write only answer not explanation."
         final_reply = self._get_reply(combined_prompt)
         return final_reply
+
+    def total_api_cost(self):
+        return self.api_cost_accumulated + self.teacher.api_cost_accumulated
