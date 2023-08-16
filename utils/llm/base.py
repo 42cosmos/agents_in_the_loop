@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import ceil, floor
-from typing import List, Literal, Optional, TypedDict
+from typing import List, Literal, Optional, TypedDict, Any
 
 MessageRole = Literal["system", "user", "assistant"]
 MessageType = Literal["ai_response", "action_result"]
@@ -51,6 +51,7 @@ class CompletionModelInfo(ModelInfo):
 @dataclass
 class ChatModelInfo(CompletionModelInfo):
     """Struct for chat model information."""
+    temperature: Any[int, float]
 
 
 @dataclass
