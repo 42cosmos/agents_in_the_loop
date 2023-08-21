@@ -291,7 +291,7 @@ class ModelTrainer(Trainer):
             compute_metrics=self.metrics.compute_metrics,
         )
 
-    def get_embedding(self, dataset):
+    def get_embeddings(self, dataset):
         self.logger.info("Get Embedding values of initial train dataset")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         input_ids = torch.tensor(dataset["input_ids"]).to(device)

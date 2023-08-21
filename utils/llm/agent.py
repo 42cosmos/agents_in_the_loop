@@ -2,20 +2,29 @@ from __future__ import annotations
 
 import json
 import os
-import copy
 import logging
 import logging.config
+from json.decoder import JSONDecodeError
 from typing import List
 
 from colorama import Fore
+from datasets import Dataset
 from dotenv import load_dotenv
 from dataclasses import dataclass, field
 
 import openai
 
 from .chat import chat_with_agent
-from .base import Message, MessageRole, MessageType, ChatModelResponse
-from .token_counter import count_string_tokens
+from .base import (
+    Message,
+    MessageRole,
+    ChatModelResponse,
+    OpenAIFunctionCall,
+    MessageFunctionCall,
+    FeedbackAgentResponse, EntityAgentResponse
+)
+
+from .token_counter import count_message_tokens
 
 logger = logging.getLogger(f"{__name__}")
 
@@ -27,13 +36,11 @@ LANGUAGES = {
     "id": "indonesian",
 }
 
+
 @dataclass
 class MessageHistory:
     agent: Agent
     messages: list[Message] = field(default_factory=list)
-    summary: str = "I was created"
-
-    last_trimmed_index: int = 0
 
     def __getitem__(self, i: int):
         return self.messages[i]
@@ -48,185 +55,32 @@ class MessageHistory:
             self,
             role: MessageRole,
             content: str,
-            type: MessageType | None = None,
+            function_call: OpenAIFunctionCall | None = None,
     ):
-        return self.append(Message(role, content, type))
+        return self.append(Message(role, content, function_call))
 
     def append(self, message: Message):
         return self.messages.append(message)
-
-    def trim_messages(
-            self, current_message_chain: list[Message], config
-    ) -> tuple[Message, list[Message]]:
-        """
-        Returns a list of trimmed messages: messages which are in the message history
-        but not in current_message_chain.
-
-        Args:
-            current_message_chain (list[Message]): The messages currently in the context.
-            config (Config): The config to use.
-
-        Returns:
-            Message: A message with the new running summary after adding the trimmed messages.
-            list[Message]: A list of messages that are in full_message_history with an index higher than last_trimmed_index and absent from current_message_chain.
-        """
-        # Select messages in full_message_history with an index higher than last_trimmed_index
-        new_messages = [
-            msg for i, msg in enumerate(self) if i > self.last_trimmed_index
-        ]
-
-        # Remove messages that are already present in current_message_chain
-        new_messages_not_in_chain = [
-            msg for msg in new_messages if msg not in current_message_chain
-        ]
-
-        if not new_messages_not_in_chain:
-            return self.summary_message(), []
-
-        new_summary_message = self.update_running_summary(
-            new_events=new_messages_not_in_chain, config=config
-        )
-
-        # Find the index of the last message processed
-        last_message = new_messages_not_in_chain[-1]
-        self.last_trimmed_index = self.messages.index(last_message)
-
-        return new_summary_message, new_messages_not_in_chain
-
-    def per_cycle(self, config, messages: list[Message] | None = None):
-        """
-        Yields:
-            Message: a message containing user input
-            Message: a message from the AI containing a proposed action
-            Message: the message containing the result of the AI's proposed action
-        """
-        messages = messages or self.messages
-        for i in range(0, len(messages) - 1):
-            ai_message = messages[i]
-            if ai_message.type != "ai_response":
-                continue
-            user_message = (
-                messages[i - 1] if i > 0 and messages[i - 1].role == "user" else None
-            )
-            result_message = messages[i + 1]
-            try:
-                assert (
-                        extract_json_from_response(ai_message.content) != {}
-                ), "AI response is not a valid JSON object"
-                assert result_message.type == "action_result"
-
-                yield user_message, ai_message, result_message
-            except AssertionError as err:
-                logger.debug(
-                    f"Invalid item in message history: {err}; Messages: {messages[i - 1:i + 2]}"
-                )
-
-    def summary_message(self) -> Message:
-        return Message(
-            "system",
-            f"This reminds you of these events from your past: \n{self.summary}",
-        )
-
-    def update_running_summary(
-            self, new_events: list[Message], config
-    ) -> Message:
-        """
-        This function takes a list of dictionaries representing new events and combines them with the current summary,
-        focusing on key and potentially important information to remember. The updated summary is returned in a message
-        formatted in the 1st person past tense.
-
-        Args:
-            new_events (List[Dict]): A list of dictionaries containing the latest events to be added to the summary.
-
-        Returns:
-            str: A message containing the updated summary of actions, formatted in the 1st person past tense.
-
-        Example:
-            new_events = [{"event": "entered the kitchen."}, {"event": "found a scrawled note with the number 7"}]
-            update_running_summary(new_events)
-            # Returns: "This reminds you of these events from your past: \nI entered the kitchen and found a scrawled note saying 7."
-        """
-        if not new_events:
-            return self.summary_message()
-
-        # Create a copy of the new_events list to prevent modifying the original list
-        new_events = copy.deepcopy(new_events)
-
-        # Replace "assistant" with "you". This produces much better first person past tense results.
-        for event in new_events:
-            if event.role.lower() == "assistant":
-                event.role = "you"
-
-                # Remove "thoughts" dictionary from "content"
-                try:
-                    content_dict = extract_json_from_response(event.content)
-                    if "thoughts" in content_dict:
-                        del content_dict["thoughts"]
-                    event.content = json.dumps(content_dict)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Error: Invalid JSON: {e}")
-                    if config.debug_mode:
-                        logger.error(f"{event.content}")
-
-            elif event.role.lower() == "system":
-                event.role = "your computer"
-
-            # Delete all user messages
-            elif event.role == "user":
-                new_events.remove(event)
-
-        # Summarize events and current summary in batch to a new running summary
-
-        # Assume an upper bound length for the summary prompt template, i.e. Your task is to create a concise running summary...., in summarize_batch func
-        prompt_template_length = 100
-        max_tokens = OPEN_AI_CHAT_MODELS.get(config.fast_llm_model).max_tokens
-        summary_tlength = count_string_tokens(str(self.summary), config.fast_llm_model)
-        batch = []
-        batch_tlength = 0
-
-        for event in new_events:
-            event_tlength = count_string_tokens(str(event), config.fast_llm_model)
-
-            if (
-                    batch_tlength + event_tlength
-                    > max_tokens - prompt_template_length - summary_tlength
-            ):
-                # The batch is full. Summarize it and start a new one.
-                self.summarize_batch(batch, config)
-                summary_tlength = count_string_tokens(
-                    str(self.summary), config.fast_llm_model
-                )
-                batch = [event]
-                batch_tlength = event_tlength
-            else:
-                batch.append(event)
-                batch_tlength += event_tlength
-
-        if batch:
-            # There's an unprocessed batch. Summarize it.
-            self.summarize_batch(batch, config)
-
-        return self.summary_message()
-
-    def summarize_batch(self, new_events_batch, config):
-        pass
 
 
 class Agent:
     def __init__(self, role,
                  config,
                  db_client,
-                 dataset_name: str = "wikiann",
-                 dataset_lang: str = "en"):
+                 dataset_name: str,
+                 dataset_lang: str):
 
         self.role = role
         self.raw_config = config
+
         self.config = config[role]
         self.db_client = db_client
         self.dataset_name = dataset_name
+        self.dataset_lang = dataset_lang
+
+        self.ner_guidance = self._get_basic_prompt()
 
         assert dataset_lang in LANGUAGES, f"dataset_lang should be one of {LANGUAGES.keys()}"
-        self.dataset_lang = LANGUAGES[dataset_lang]
 
         self.api_cost_accumulated = 0.0
 
@@ -252,99 +106,186 @@ class Agent:
         if self.organisation_key:
             openai.organization = self.organisation_key
 
-    def _get_reply(self, prompt):
-        assert self.system_prompt is not None, f"Please set system_prompt for {self.role} agent"
-        agent_reply = self.create_chat_with_agent(prompt)
-        return agent_reply
+    def _get_basic_prompt(self):
+        information = self.db_client.get_prompt(data_id=f"{self.dataset_name}:{LANGUAGES[self.dataset_lang]}",
+                                                doc_prefix="prompt")
+        warning_sign = ""
+        if self.role == "student":
+            warning_sign = self.db_client.get_prompt(data_id=f"warning",
+                                                     doc_prefix="prompt")
 
-    def get_cost(self, answers: List[ChatModelResponse]):
-        cost = 0.0
-        for answer in answers:
-            api_cost = answer.model_info.prompt_token_cost + answer.model_info.completion_token_cost
-            cost += api_cost
-            self.api_cost_accumulated += api_cost
-        logging.info(
-            f"This conversation {len(answers)} cost is {cost}, Total cost of this conversation is {self.api_cost_accumulated} tokens")
+        elif self.role == "teacher":
+            warning_sign = self.db_client.get_prompt(data_id=f"teacher:warning",
+                                                     doc_prefix="prompt")
 
-    def create_chat_with_agent(self, prompt, use_function_call=False):
+        return f"{information}\n{warning_sign}"
+
+    # def get_cost(self, data_id, answers: List[ChatModelResponse]):
+    #     cost = 0.0
+    #     for answer in answers:
+    #         # input_cost_per_tokens = answer.model_info.prompt_token_cost
+    #         # output_cost_per_tokens = answer.model_info.completion_token_cost
+    #
+    #         # cost += api_cost
+    #         # self.api_cost_accumulated += api_cost
+    #     logging.info(f"Total cost of {data_id} conversation is {self.api_cost_accumulated} tokens")
+
+    def _get_prompt(self, triggering_prompt):
+        return [Message("system", self.system_prompt),
+                Message("user", self.ner_guidance),
+                Message("user", triggering_prompt)]
+
+    def create_chat_with_agent(self,
+                               user_sentence,
+                               function_call_examples=None,
+                               expected_return_tokens: int = 0):
+        assert user_sentence, "Please set your question"
+
+        if function_call_examples is not None:
+            assert isinstance(function_call_examples, list)
+            assert all([isinstance(example, MessageFunctionCall) for example in function_call_examples])
+
         assistant_reply = chat_with_agent(
             agent=self,
             system_prompt=self.system_prompt,
-            triggering_prompt=prompt,
-            use_function_call=use_function_call
+            llm_guidance=self.ner_guidance,
+            triggering_prompt=user_sentence,
+            function_call_examples=function_call_examples,
+            expected_return_tokens=expected_return_tokens
         )
-        self.get_cost([assistant_reply])
         return assistant_reply
-
-    def get_memories(self):
-        return self.db_client.get_all_from_list(self.config.memory_key)
 
 
 class Teacher(Agent):
-    def __init__(self, config, db_client):
-        super().__init__("teacher", config, db_client)
+    def __init__(self, config, db_client, dataset_name, dataset_lang):
+        super().__init__("teacher", config, db_client, dataset_name, dataset_lang)
 
-    def give_feedback(self, question, student_reply):
-        feedback_history = self.db_client.get_all_key_by_pattern(f"memory:teacher:{data_id}*")
-        if feedback_history:
-            feedback_history = [self.db_client.get_prompt(data_id=key,
-                                                          field_name="prompt",
-                                                          doc_prefix="memory")
-                                for key in feedback_history]
-            feedback_history = "\n".join(feedback_history)
-        # TODO: 비슷한 문제에 너는 다음과 같이 대답했다. 이를 종합해 항상 학생에게 더 나은 피드백을 제공하라.
+    def give_feedback(self, student_reply, problem_sentence: list):
+        if student_reply is None:
+            prompt = f"""There is no answer given by the student.\n Question Sentence: {str(problem_sentence)}"""
 
-        prompt = f"""The sentence in which the entity should be found: "{question}"
-Student answer: "{student_reply}" """.strip()
-        assistant_reply = self.create_chat_with_agent(prompt, use_function_call=False)
-        logging.info("Teacher Feedback is given...")
+        else:
+            problem_sentence = student_reply.tokens
+            student_answer = student_reply.ner_tags
+            prompt = f"""Here's the sentence in which the student has to find the entity, and the answer given by the student:\nQuestion Sentence: {str(problem_sentence)}\nStudent's Answer: "{student_answer}" """.strip()
+        assistant_reply = self.create_chat_with_agent(prompt)
+
         return assistant_reply
 
 
 class Student(Agent):
     def __init__(self, config, db_client, dataset_name, dataset_lang):
         super().__init__("student", config, db_client, dataset_name, dataset_lang)
-        self.teacher = Teacher(config=self.raw_config, db_client=db_client)
-
-    def _get_basic_prompt(self):
-        information = self.db_client.get_prompt(data_id=f"{self.dataset_name}:{self.dataset_lang}",
-                                                doc_prefix="prompt")
-
-        warning_sign = self.db_client.get_prompt(data_id=f"warning",
-                                                 doc_prefix="prompt")
-
-        return f"{information}\n{warning_sign}"
-
-    def _add_example(self, prompt, similar_example):
-        basic_information = self._get_basic_prompt()
-        if similar_example:
-            return f"{basic_information}\n\n{similar_example}\n{prompt}"
-
-        # TODO: similar_example이 없을 때, 기본 예제를 넣는 방식으로 변경
-        return f"{basic_information}\n\n{similar_example}\n{prompt}"
+        self.teacher = Teacher(config=self.raw_config,
+                               db_client=db_client,
+                               dataset_name=dataset_name,
+                               dataset_lang=dataset_lang)
 
     def talk_to_agent(self,
-                      user_sentence,
-                      similar_example,
-                      data_id, get_feedback=False, save_db=True):
+                      data_id,
+                      request_tokens: list,
+                      similar_example: List[MessageFunctionCall],
+                      get_feedback=False,
+                      save_db=True):
 
-        prompt = self._add_example(user_sentence, data_id)
-        answers = [self.create_chat_with_agent(prompt, use_function_call=True)]  # student 1
+        prompt = str(request_tokens)
+        get_predicted_token_usage = count_expected_tokens(request_tokens)
+
+        answers = [self.create_chat_with_agent(prompt,
+                                               function_call_examples=similar_example,
+                                               expected_return_tokens=get_predicted_token_usage)]  # student 1
+
         if get_feedback:
-            feedback = self.teacher.give_feedback(answers[0], prompt)  # teacher 1
-            final_answer = self._finalise_reply(prompt, answers[0], feedback)  # student 2
+            student_first_answer = answer_to_data(data_id, answers[0])
+            teachers_feedback = self.teacher.give_feedback(student_first_answer,
+                                                           problem_sentence=request_tokens)
 
-            answers.extend([feedback, final_answer])
-            # self.get_cost(all_answer)
+            final_answer = self._finalise_reply(question_sentence=request_tokens,
+                                                initial_answer=student_first_answer.ner_tags,
+                                                teacher_feedback=teachers_feedback.content,
+                                                function_call_examples=similar_example)
+
+            answers.extend([teachers_feedback, final_answer])
+
+        # self.get_cost(answers)
+
         if save_db:
-            self.db_client.set_prompts(prompt_datum=answers, data_id=data_id)
+            self.db_client.insert_conversation(prompt_datum=answers, data_id=data_id)
 
-        return answers[-1]
+        return answers
 
-    def _finalise_reply(self, question, initial_reply, teacher_feedback):
-        combined_prompt = f"This Problem ({question})'s your initial answer is: {initial_reply}\n Teacher's feedback: {teacher_feedback}\n Please write your final answer. but you have to write only answer not explanation."
-        final_reply = self._get_reply(combined_prompt)
+    def _finalise_reply(self, question_sentence, initial_answer, teacher_feedback, function_call_examples):
+        combined_prompt = f"""The Question Sentence is: {question_sentence}
+Your initial answer is: {initial_answer}
+Peer Review: {teacher_feedback}
+Please write your final answer. But you don't have to follow the Review if you're confident with your original answer."""
+        final_reply = self.create_chat_with_agent(combined_prompt, function_call_examples=function_call_examples)
         return final_reply
 
-    def total_api_cost(self):
-        return self.api_cost_accumulated + self.teacher.api_cost_accumulated
+    # def total_api_cost(self):
+    #     return self.api_cost_accumulated + self.teacher.api_cost_accumulated
+
+
+def get_similar_dataset(db_client, dataset, model_name, vector, data_id, num=2):
+    from utils.main_utils import match_indices_from_base_dataset
+    similar_keys = db_client.search_similar_vector_by_data_id(model_name, vector, num=num + 1)
+    if similar_keys is None:
+        logging.info("There is no similar data")
+        return None
+    data_ids = [key.split(f"{model_name}:")[-1] for key in similar_keys if key.split(":")[-1] != data_id.split(":")[-1]]
+    # 자기 자신은 없지만 3개가 나올 때
+    data_ids = data_ids[:num + 1] if len(data_ids) > num else data_ids
+    result: Dataset = match_indices_from_base_dataset(dataset, data_ids, remove=False)
+    return result.select([i for i in range(num)])
+
+
+def count_expected_tokens(tokens: list):
+    ner_tags = ["XYZ"] * len(tokens)
+    dummy_example = {"response":
+                         [{"word": token, "entity": tag} for token, tag in zip(tokens, ner_tags)]
+                     }
+    return count_message_tokens([MessageFunctionCall(role="function",
+                                                     name="find_ner",
+                                                     content=dummy_example)])
+
+
+def get_example(dataset, id_to_label=None, function_name="find_ner"):
+    from functools import partial
+
+    examples = []
+    encode_fn = partial(make_example, id_to_label=id_to_label)
+    entities = dataset.map(encode_fn)
+    for entity_ex in entities:
+        sample = entity_ex["response"]
+        example = MessageFunctionCall(role="function",
+                                      name=function_name,
+                                      content={"response": sample})
+        examples.append(example)
+
+    return examples
+
+
+def make_example(example, id_to_label=None):
+    tokens = example['tokens']
+    ner_tags = example["ner_tags"]
+
+    if id_to_label is not None:
+        return {"response": [{"word": token, "entity": id_to_label[tag]} for token, tag in zip(tokens, ner_tags)]}
+    return {"response": [{"word": token, "entity": tag} for token, tag in zip(tokens, ner_tags)]}
+
+
+def answer_to_data(data_id, answer):
+    arguments_return = answer.function_call.arguments
+    retval_json = json.loads(arguments_return)
+    # TODO: keyError 시 대응 방안
+    try:
+        response = retval_json["response"]
+    except KeyError as key_error:
+        logging.error(f"KeyError in {data_id}: {key_error}")
+        return {"response": [
+            {"entity": "", "word": ""}
+        ]}
+
+    entities, words = zip(*[(entity_dict['entity'], entity_dict['word'])
+                            for entity_dict in response])
+    return EntityAgentResponse(data_id=data_id, tokens=list(words), ner_tags=list(entities))

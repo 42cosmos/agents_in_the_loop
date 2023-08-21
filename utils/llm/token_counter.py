@@ -9,7 +9,7 @@ from .base import Message
 
 
 def count_message_tokens(
-        messages: List[Message], model: str = "gpt-3.5-turbo-0301"
+        messages: List[Message], model: str = "gpt-3.5-turbo-0613"
 ) -> int:
     """
     Returns the number of tokens used by a list of messages.
@@ -49,7 +49,8 @@ def count_message_tokens(
     for message in messages:
         num_tokens += tokens_per_message
         for key, value in message.raw().items():
-            num_tokens += len(encoding.encode(value))
+            if value is not None:
+                num_tokens += len(encoding.encode(value))
             if key == "name":
                 num_tokens += tokens_per_name
     num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>

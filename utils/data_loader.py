@@ -10,13 +10,14 @@ from datasets import load_dataset
 
 
 class NerProcessor:
-    def __init__(self, args):
+    def __init__(self, args, test: int = 0):
         self.logger = logging.getLogger(__name__.split(".")[-1])
 
+        self.test = test
         self.args = args
         self.mode = args.data_mode
-
-        cached_file_name = f"cached-{self.args.dataset_name}_{self.args.dataset_lang}_{self.args.data_mode}-seq_len_{self.args.max_seq_length}"
+        self.dataset_name = f"eunbincosmos/{self.args.dataset_name}-{self.args.dataset_lang}"
+        cached_file_name = f"cached-{self.dataset_name}_{self.args.data_mode}-seq_len_{self.args.max_seq_length}"
         if "/" in cached_file_name:
             cached_file_name = cached_file_name.replace("/", "_")
 
@@ -25,6 +26,9 @@ class NerProcessor:
 
         if "original" != self.args.data_mode:
             cached_file_name += f"-{self.args.initial_train_n_percentage}%"
+
+        if self.test > 0:
+            cached_file_name = f"TEST_{self.test}::{cached_file_name}"
 
         self.cached_file_name = cached_file_name
         self.cached_features_file = os.path.join(self.args.data_dir, cached_file_name)
@@ -56,14 +60,12 @@ class NerProcessor:
         if cached_file:
             return cached_file
 
-        self.logger.info(f"Creating dataset named '{self.args.dataset_name}'")
-        if self.args.dataset_name == "wikiann":
-            self.raw_dataset = load_dataset(self.args.dataset_name, self.args.dataset_lang)
-        else:
-            self.raw_dataset = load_dataset(self.args.dataset_name)
+        self.logger.info(f"Creating dataset named '{self.args.dataset_name}-{self.args.dataset_lang}'")
+        self.raw_dataset = load_dataset(self.dataset_name)
 
+        add_idx = partial(self.add_id, prefix=f"{self.args.dataset_name}:{self.args.dataset_lang}")
         self.raw_dataset = self.raw_dataset if "id" in self.raw_dataset["train"].features else \
-            self.raw_dataset.map(self.add_id, with_indices=True)
+            self.raw_dataset.map(add_idx, with_indices=True)
 
         required_columns = ['id', 'tokens', 'ner_tags']
         for split in self.raw_dataset.keys():
@@ -71,6 +73,9 @@ class NerProcessor:
                 [col for col in self.raw_dataset[split].column_names if col not in required_columns])
 
         self.train_dataset = self.raw_dataset["train"]
+        if self.test > 0:
+            self.train_dataset = self.train_dataset.select(range(self.test))
+
         self.valid_dataset = self.raw_dataset["validation"]
         self.test_dataset = self.raw_dataset["test"] if "test" in self.raw_dataset else None
 
@@ -175,7 +180,10 @@ class NerProcessor:
         return label_to_id, id_to_label
 
     @staticmethod
-    def add_id(example, idx):
+    def add_id(example, idx, prefix=None):
+        if prefix is not None:
+            idx = f"{prefix}:{idx}"
+
         example['id'] = idx
         return example
 

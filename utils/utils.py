@@ -7,6 +7,8 @@ import datetime
 import time
 import traceback
 
+import numpy as np
+
 import torch
 import nvidia_smi
 import subprocess
@@ -116,6 +118,3 @@ def handle_rate_limit_error(rate_limit_err, logger):
     # RateLimitError 처리 부분
     logger.error(f"{handle_rate_limit_error.__name__}: Rate Limit Error Occurred: {rate_limit_err}")
     time.sleep(60)
-
-
-

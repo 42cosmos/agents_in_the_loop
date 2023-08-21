@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Any, List, Dict
+import os
+from typing import List
 
 import redis
 from redis.commands.search.field import (
@@ -12,12 +13,32 @@ from redis.commands.search.field import (
 from redis.commands.search.query import Query
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 
+from dotenv import load_dotenv
+
+from utils.llm.base import OpenAIFunctionCall, MessageFunctionCall, ChatModelResponse
+
 
 class RedisClient:
-    def __init__(self, host='localhost', port=6379, db=0):
-        self.redis_conn = redis.Redis(host=host, port=port, db=db)
+    def __init__(self, env_path="/home/eunbinpark/workspace/agents_in_the_loop/utils/database/redis.env"):
+        load_dotenv(dotenv_path=env_path)
+        host = os.getenv("REDIS_HOST", None)
+        assert host, "REDIS_HOST is not set !"
 
-    def get_information_by_index_name(self, index_name):
+        port = os.getenv("REDIS_PORT", None)
+        assert port, "REDIS_PORT is not set !"
+
+        db = os.getenv("REDIS_DB", None)
+        assert db, "REDIS_DB is not set !"
+
+        password = os.getenv("REDIS_PASSWORD", None)
+        assert password, "REDIS_PASSWORD is not set !"
+
+        self.redis_conn = redis.Redis(host=host, port=port, db=db, password=password)
+
+    def get_information_by_index_name(self, index_name=None):
+        if index_name is None:
+            index_name = self.index_name
+
         try:
             return self.redis_conn.ft(index_name).info()
         except Exception as e:
@@ -63,15 +84,26 @@ class RedisClient:
             logging.error(f"Error in delete_key: {e}")
             raise
 
-    def delete_documents_by_index_name(self, index_name):
+    def delete_documents_by_doc_prefix(self, doc_prefix=None):
         """
         BEWARE ! Delete all data in redis
         """
+        if doc_prefix is None:
+            raise ValueError("doc_prefix must be specified !")
+
         try:
-            results = self.redis_conn.ft(index_name).search(Query('*'))
-            for doc in results.docs:
-                self.redis_conn.delete(doc.id)
-            logging.info(f"Deleted {len(results.docs)} documents from {index_name}")
+            if isinstance(doc_prefix, str):
+                results = self.get_all_key_by_pattern(f"{doc_prefix}*")
+                for doc_id in results:
+                    self.redis_conn.delete(doc_id)
+                logging.info(f"Deleted {len(results)} documents from {doc_prefix}")
+            if isinstance(doc_prefix, list):
+                for prefix in doc_prefix:
+                    results = self.get_all_key_by_pattern(f"{prefix}*")
+                    for doc in results:
+                        self.redis_conn.delete(doc_id)
+                    logging.info(f"Deleted {len(results)} documents from {prefix}")
+
         except Exception as e:
             logging.error(f"Error in delete_documents_by_index_name: {e}")
             raise
@@ -81,9 +113,6 @@ class RedisVector(RedisClient):
     def __init__(self,
                  dataset_title_value: str,
                  dataset_lang_value: str,
-                 host: str = 'localhost',
-                 port: int = 6379,
-                 db=0,
                  index_name="dataset_embeddings",
                  doc_prefix="dataset:",
                  dataset_field_name: str = "dataset_name",
@@ -93,7 +122,7 @@ class RedisVector(RedisClient):
                  embedding_size=768,
                  remove_history=False
                  ):
-        super().__init__(host, port, db)
+        super().__init__()
 
         self.dataset_field_name = dataset_field_name
         self.dataset_title_value = dataset_title_value
@@ -110,11 +139,11 @@ class RedisVector(RedisClient):
         self.doc_prefix = doc_prefix
 
         if remove_history:
-            self.delete_documents_by_index_name(self.index_name)
+            self.delete_documents_by_doc_prefix(self.doc_prefix)
         self.set_schema()
 
     def _get_id_key(self, model_name, data_id):
-        return f"{self.doc_prefix}{self.dataset_title_value}:{self.dataset_lang_value}:{model_name}:{data_id}"
+        return f"{self.doc_prefix}{model_name}:{data_id}"
 
     def insert_vectors(self, model_name: str, ids, vectors):
         assert len(ids) == len(vectors), "Names and vectors must have the same length !"
@@ -125,6 +154,8 @@ class RedisVector(RedisClient):
             self._insert_single_vector(model_name=model_name, data_id=id_,
                                        vector=vector, pipeline=pipeline)
         pipeline.execute()
+
+        logging.info(f"Inserted {len(ids)} vectors !")
 
     def _insert_single_vector(self, model_name, data_id, vector, pipeline=None):
         document = {
@@ -161,28 +192,32 @@ class RedisVector(RedisClient):
             definition = IndexDefinition(prefix=[self.doc_prefix], index_type=IndexType.HASH)
 
             self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
+            self.redis_conn.ft(self.index_name).config_set("default_dialect", 2)
             logging.info(f"Index {self.index_name} created !")
 
-    def get_vector(self, data_id, field_name):
+    def get_vector(self, model_name, data_id, field_name="embedding"):
         """
-        :param data_id: 데이터베이스 key 값
+        :param model_name: 임베딩 모델 이름
+        :param data_id: 데이터베이스 key 값, 데이터 번호만 입력
         :param field_name: 스키마의 key 값
         """
+        data_key_for_redis = self._get_id_key(model_name=model_name, data_id=data_id)
         try:
-            return self.redis_conn.hget(data_id, field_name)
+            return self.redis_conn.hget(data_key_for_redis, field_name)
         except Exception as e:
             logging.error(f"Error in get_vector: {e}")
             raise
 
-    def get_similar_vector_id(self, model_name, vector, num=10):
-        similarity_query = f'(@{self.dataset_field_name}:{{{{{self.dataset_title_value}}}}} ' \
-                           f'@{self.dataset_lang_field_name}:{{{{{self.dataset_lang_value}}}}} ' \
-                           f'@{self.model_field_name}:{{{{{model_name}}}}})' \
+    def search_similar_vector_by_data_id(self, model_name, vector, num=10):
+        similarity_query = f'(@{self.dataset_field_name}:{{{self.dataset_title_value}}} ' \
+                           f'@{self.dataset_lang_field_name}:{{{self.dataset_lang_value}}} ' \
+                           f'@{self.model_field_name}:{{{model_name}}})' \
                            f'=>[KNN {num} @{self.vector_field_name} $vec_param AS dist]'
-        q = Query(similarity_query).sort_by('dist')
-        vector_params = {"vec_param": vector.tobytes()}
+        q = Query(similarity_query).sort_by('dist').dialect(2)
+        vector_params = {"vec_param": vector if isinstance(vector, bytes) else vector.tobytes()}
+
         try:
-            res = self.redis_conn.ft().search(q, query_params=vector_params)
+            res = self.redis_conn.ft(self.index_name).search(q, query_params=vector_params)
         except Exception as e:
             logging.error(f"Error in get_similar_vector_id: {e}")
             raise
@@ -193,15 +228,12 @@ class RedisVector(RedisClient):
 
 class RedisPrompt(RedisClient):
     def __init__(self,
-                 host: str = 'localhost',
-                 port: int = 6379,
-                 db=0,
-                 index_name="conversation",
-                 prompt_field_name="prompt",
+                 index_name: str = "conversation_memory",
+                 prompt_field_name: str = "prompt",
                  doc_prefixes=None,
                  remove_history=False):
 
-        super().__init__(host, port, db)
+        super().__init__()
 
         if doc_prefixes is None:
             doc_prefixes = ["memory", "prompt"]
@@ -211,52 +243,65 @@ class RedisPrompt(RedisClient):
         self.doc_prefixes = doc_prefixes
 
         if remove_history:
-            self.delete_documents_by_index_name(self.index_name)
+            self.delete_documents_by_doc_prefix(self.doc_prefixes)
         self.set_prompt_schema()
 
-    def get_prompt_id(self, id_, doc_prefix="memory"):
+    def _get_prompt_id(self, id_, doc_prefix="memory"):
         doc_prefix = doc_prefix.lower()
         assert doc_prefix in self.doc_prefixes, "doc_prefix must be memory or prompt!"
         set_doc_prefix = doc_prefix if doc_prefix.endswith(":") else doc_prefix + ":"
 
         return f"{set_doc_prefix}{id_}"
 
-    def set_prompts(self, prompt_datum: List[Dict], doc_prefix="memory"):
+    def set_prompt(self, prompt: str, data_id, doc_prefix="memory"):
+        self._set_single_prompt(data_id=data_id,
+                                prompt_data=prompt,
+                                doc_prefix=doc_prefix)
+
+    def _set_single_prompt(self, data_id, prompt_data: str, doc_prefix="memory", pipeline=None):
+        document = {
+            self.prompt_field_name: prompt_data
+        }
+
+        prompt_key = self._get_prompt_id(data_id, doc_prefix)
+        if pipeline:
+            pipeline.hset(prompt_key, mapping=document)
+            pipeline.ft(self.index_name).add_document(prompt_key, **document, replace=True)
+        else:
+            self.redis_conn.hset(prompt_key, mapping=document)
+            self.redis_conn.ft(self.index_name).add_document(prompt_key, **document, replace=True)
+            logging.info(f"Prompt {prompt_key} added !")
+
+    def insert_conversation(self, prompt_datum: List[ChatModelResponse], data_id, doc_prefix="memory"):
         """
+        :param prompt_datum: Model Responses in List
+        :param data_id: data_id of train data
         :param doc_prefix: memory or prompt
-        :param prompt_datum: dictionaries in List with keys prompt, initial_answer, feedback, final_answer
         """
         try:
             pipeline = self.redis_conn.pipeline()
 
-            for dict_data in prompt_datum:
-                # TODO: set_prompt로 들어오는 datum 재정의
-                data_id = dict_data["id"] # memory:student:{data_id}:{#}
-                data_id = self.get_prompt_id(data_id, doc_prefix)
-                prompt_data = dict_data["llm_answer"]
+            for idx, data in enumerate(prompt_datum):
+                # 첫 번째와 세 번째 대답은 학생
+                agent_role = "student" if idx % 2 == 0 else "teacher"
+                data_key = f"{agent_role}:{data_id}:{idx}"
 
-                self._set_single_prompt(data_id=data_id,
-                                        prompt_data=prompt_data,
+                if agent_role == "student":
+                    llm_answer = data.function_call.arguments
+                else:
+                    llm_answer = data.content
+
+                self._set_single_prompt(data_id=data_key,
+                                        prompt_data=llm_answer,
                                         doc_prefix=doc_prefix,
                                         pipeline=pipeline)
-
+            pipeline.execute()
 
         except Exception as e:
             db_info = self.get_information_by_index_name(self.index_name)
             num_docs, num_failure = db_info["num_docs"], db_info["hash_indexing_failures"]
             logging.error(f"Error in set_prompt : {e}, num_docs : {num_docs}, num_failure : {num_failure}")
             raise
-
-    def _set_single_prompt(self, data_id, prompt_data: dict, doc_prefix="memory", pipeline=None):
-        prompt_key = self.get_prompt_id(data_id, doc_prefix)
-        serialised_data = json.dumps(prompt_data)
-        if pipeline:
-            pipeline.set(prompt_key, serialised_data)
-            pipeline.ft(self.index_name).add_document(prompt_key, **prompt_data, replace=True)
-        else:
-            self.redis_conn.set(prompt_key, serialised_data)
-            self.redis_conn.ft(self.index_name).add_document(prompt_key, **prompt_data, replace=True)
-            logging.info(f"Prompt {prompt_key} added !")
 
     def set_prompt_schema(self):
         try:
@@ -267,13 +312,14 @@ class RedisPrompt(RedisClient):
             schema = (
                 TextField(self.prompt_field_name),
             )
-            definition = IndexDefinition(prefix=[self.doc_prefixes], index_type=IndexType.HASH)
-
+            definition = IndexDefinition(prefix=self.doc_prefixes, index_type=IndexType.HASH)
             self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
+            self.redis_conn.ft(self.index_name).config_set("default_dialect", 2)
+
             logging.info(f"Index {self.index_name} created !")
 
     def get_prompt(self, data_id, doc_prefix="memory"):
-        data_id_for_search = self.get_prompt_id(data_id, doc_prefix)
+        data_id_for_search = self._get_prompt_id(data_id, doc_prefix)
         try:
             prompt_value = self.redis_conn.hget(data_id_for_search, self.prompt_field_name)
             if prompt_value:
@@ -286,7 +332,7 @@ class RedisPrompt(RedisClient):
             raise
 
     def get_prompt_json(self, data_id, doc_prefix="memory"):
-        data_id_for_search = self.get_prompt_id(data_id, doc_prefix)
+        data_id_for_search = self._get_prompt_id(data_id, doc_prefix)
         try:
             serialised_data = self.redis_conn.get(data_id_for_search)
             if serialised_data:
@@ -296,3 +342,8 @@ class RedisPrompt(RedisClient):
         except Exception as e:
             logging.error(f"Error in get_prompt_json : {e}")
             raise
+
+
+if __name__ == "__main__":
+    prompt_client = RedisPrompt()
+    # print(prompt_client)

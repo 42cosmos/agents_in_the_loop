@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from math import ceil, floor
-from typing import List, Literal, Optional, TypedDict, Any
+from typing import List, Literal, Optional, TypedDict, Any, Union
 
-MessageRole = Literal["system", "user", "assistant"]
+from pydantic import BaseModel
+
+MessageRole = Literal["system", "user", "assistant", "function"]
 MessageType = Literal["ai_response", "action_result"]
 
 TText = list[int]
@@ -22,10 +25,20 @@ class Message:
 
     role: MessageRole
     content: str
-    type: MessageType | None = None
+    function_call: OpenAIFunctionCall | None = None
 
     def raw(self) -> MessageDict:
         return {"role": self.role, "content": self.content}
+
+
+@dataclass
+class MessageFunctionCall:
+    role: MessageRole
+    name: str
+    content: MessageType | None = None
+
+    def raw(self) -> MessageDict:
+        return {"role": self.role, "name": self.name, "content": json.dumps(self.content)}
 
 
 @dataclass
@@ -51,7 +64,6 @@ class CompletionModelInfo(ModelInfo):
 @dataclass
 class ChatModelInfo(CompletionModelInfo):
     """Struct for chat model information."""
-    temperature: Any[int, float]
 
 
 @dataclass
@@ -165,10 +177,49 @@ class OpenAIFunctionCall:
     name: str
     arguments: str
 
+    def raw(self) -> dict[str, str]:
+        return {"name": self.name, "arguments": self.arguments}
+
 
 @dataclass
 class ChatModelResponse(LLMResponse):
     """Standard response struct for a response from an LLM model."""
 
     content: Optional[str] = None
-    function_call: Optional[OpenAIFunctionCall] = None
+    function_call: Union[EntityAgentResponse, FeedbackAgentResponse] = None
+
+
+class FeedbackAgentResponse(BaseModel):
+    response: List[str]
+
+    def raw(self) -> MessageDict:
+        return {"response": self.response}
+
+
+@dataclass
+class EntityAgentResponse:
+    data_id: str
+    tokens: List[str]
+    ner_tags: List[str]
+
+    def raw(self) -> MessageDict:
+        return {"tokens": self.tokens, "ner_tags": self.ner_tags}
+
+    def __post_init__(self):
+        if len(self.tokens) != len(self.ner_tags):
+            raise ValueError("Tokens and NER tags must be the same length")
+
+# def get_example(dataset, id_to_label, function_name="find_ner"):
+#     from functools import partial
+#
+#     examples = []
+#     encode_fn = partial(make_example, id_to_label=id_to_label)
+#     entities = dataset.map(encode_fn)
+#     for entity_ex in entities:
+#         entities = entity_ex["entities"]
+#         tokens = str(entity_ex["tokens"])
+#         function_example = OpenAIFunctionCall(name=function_name,
+#                                               arguments=json.dumps({"entities": entities}))
+#         examples.append(MessageFunctionCall("assistant", tokens, function_example))
+#
+#     return examples
