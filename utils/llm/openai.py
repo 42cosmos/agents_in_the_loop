@@ -1,3 +1,4 @@
+import ast
 import functools
 import time
 import logging
@@ -6,7 +7,7 @@ from dataclasses import dataclass
 
 from colorama import Fore, Style
 
-from .base import ChatModelInfo, MessageDict, FeedbackAgentResponse
+from .base import ChatModelInfo, MessageDict
 
 from openai.openai_object import OpenAIObject
 import openai.api_resources.abstract.engine_api_resource as engine_api_resource
@@ -85,8 +86,13 @@ class OpenAIFunctionSpec:
                 "parameters": self.parameters}
 
 
+class TokenMismatchError(Exception):
+    """Raised when there's a mismatch between token length."""
+    pass
+
+
 def retry_api(
-        num_retries: int = 5,
+        num_retries: int = 2,
         backoff_base: float = 2.0,
         warn_user: bool = True,
 ):
@@ -102,10 +108,11 @@ def retry_api(
         ServiceUnavailableError: f"{Fore.RED}Error: The OpenAI API engine is currently overloaded, passing...{Fore.RESET}",
         RateLimitError: f"{Fore.RED}Error: Reached rate limit, passing...{Fore.RESET}",
         JSONDecodeError: f"{Fore.RED}Error: Failed to decode JSON response, passing...{Fore.RESET}",
+        TokenMismatchError: f"{Fore.RED}Error: Mismatch between question tokens and response tokens, passing...{Fore.RESET}",
     }
 
     json_decode_error_msg = (
-        f"{Fore.RED}Error: Failed to decode JSON response. "
+        f"{Fore.RED}Error: Failed to decode JSON response. {Fore.RESET}"
     )
 
     api_key_error_msg = (
@@ -120,15 +127,14 @@ def retry_api(
         @functools.wraps(func)
         def _wrapped(*args, **kwargs):
             user_warned = not warn_user
-            num_attempts = num_retries + 1  # +1 for the first attempt
-            for attempt in range(1, num_attempts + 1):
+            for attempt in range(1, num_retries + 1):
                 try:
                     return func(*args, **kwargs)
 
-                except (JSONDecodeError, RateLimitError, ServiceUnavailableError) as e:
-                    if attempt == num_attempts:
-                        if isinstance(e, JSONDecodeError):
-                            logger.error(f"Max retries reached. Returning empty value due to JSONDecodeError.")
+                except (JSONDecodeError, RateLimitError, ServiceUnavailableError, TokenMismatchError) as e:
+                    if attempt == num_retries:
+                        if isinstance(e, (JSONDecodeError, TokenMismatchError)):
+                            logger.error(f"Max retries reached. Returning empty value due to {type(e).__name__}.")
                             return False
                         else:
                             raise
@@ -137,7 +143,16 @@ def retry_api(
                     logger.debug(error_msg)
 
                     if isinstance(e, JSONDecodeError):
-                        logger.error(f"{json_decode_error_msg} - attempt {attempt} of {num_attempts}")
+                        logger.error(f"{json_decode_error_msg} - attempt {attempt} of {num_retries}")
+                        user_warned = True
+
+                    if isinstance(e, TokenMismatchError):
+                        logger.error(f"{error_msg} - attempt {attempt} of {num_retries}")
+                        user_warned = True
+
+                    if isinstance(e, RateLimitError):
+                        logger.error(f"RateLimitError occurred. Waiting 60 seconds...")
+                        time.sleep(60)
                         user_warned = True
 
                     if not user_warned and type(e) is not JSONDecodeError:
@@ -145,7 +160,7 @@ def retry_api(
                         user_warned = True
 
                 except (APIError, Timeout) as e:
-                    if (e.http_status not in [429, 502]) or (attempt == num_attempts):
+                    if (e.http_status not in [429, 502]) or (attempt == num_retries):
                         raise
 
                 backoff = backoff_base ** (attempt + 2)
@@ -160,6 +175,7 @@ def retry_api(
 @retry_api()
 def create_chat_completion(
         messages: List[MessageDict],
+        question_tokens,
         role,
         *_,
         **kwargs,
@@ -182,6 +198,9 @@ def create_chat_completion(
     if role == "student":
         import json
         check_json_decode_error = json.loads(completion.choices[0].message.function_call["arguments"])
+
+        if len(question_tokens) != len(check_json_decode_error["response"]):
+            raise TokenMismatchError("Mismatch between question tokens and response tokens.")
 
     if not hasattr(completion, "error"):
         logger.debug(f"Response: {completion}")
@@ -212,9 +231,3 @@ ner_gpt_function = {
     },
     "required": ["response"]
 }
-
-teacher_response_function = OpenAIFunctionSpec(
-    name="teacher_response",
-    description="Get Teachers Feedback in series of steps",
-    parameters=FeedbackAgentResponse.schema(),
-)
