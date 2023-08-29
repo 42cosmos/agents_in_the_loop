@@ -35,16 +35,6 @@ class RedisClient:
 
         self.redis_conn = redis.Redis(host=host, port=port, db=db, password=password)
 
-    def get_information_by_index_name(self, index_name=None):
-        if index_name is None:
-            index_name = self.index_name
-
-        try:
-            return self.redis_conn.ft(index_name).info()
-        except Exception as e:
-            logging.error(f"Error in get_information_by_index_name: {e}")
-            raise
-
     def get_all_key_by_pattern(self, pattern='*'):
         try:
             return [key.decode('utf-8') for key in self.redis_conn.keys(pattern)]
@@ -100,7 +90,7 @@ class RedisClient:
             if isinstance(doc_prefix, list):
                 for prefix in doc_prefix:
                     results = self.get_all_key_by_pattern(f"{prefix}*")
-                    for doc in results:
+                    for doc_id in results:
                         self.redis_conn.delete(doc_id)
                     logging.info(f"Deleted {len(results)} documents from {prefix}")
 
@@ -141,6 +131,16 @@ class RedisVector(RedisClient):
         if remove_history:
             self.delete_documents_by_doc_prefix(self.doc_prefix)
         self.set_schema()
+
+    def get_information_by_index_name(self, index_name=None):
+        if index_name is None:
+            index_name = self.index_name
+
+        try:
+            return self.redis_conn.ft(index_name).info()
+        except Exception as e:
+            logging.error(f"Error in get_information_by_index_name: {e}")
+            raise
 
     def _get_id_key(self, model_name, data_id):
         return f"{self.doc_prefix}{model_name}:{data_id}"
@@ -219,57 +219,51 @@ class RedisVector(RedisClient):
         try:
             res = self.redis_conn.ft(self.index_name).search(q, query_params=vector_params)
         except Exception as e:
-            logging.error(f"Error in get_similar_vector_id: {e}")
+            logging.error(f"Error in search_similar_vector_by_data_id: {e}")
             raise
         # 데이터셋 아이디만 추출
         doc_ids = [doc.id for doc in res.docs]
         return doc_ids
 
 
-class RedisPrompt(RedisClient):
+class RedisLLMResponse(RedisClient):
     def __init__(self,
                  index_name: str = "conversation_memory",
-                 prompt_field_name: str = "prompt",
-                 doc_prefixes=None,
+                 doc_prefix=None,
                  remove_history=False):
 
         super().__init__()
 
-        if doc_prefixes is None:
-            doc_prefixes = ["memory", "prompt"]
+        if doc_prefix is None:
+            doc_prefix = "memory"
 
         self.index_name = index_name
-        self.prompt_field_name = prompt_field_name
-        self.doc_prefixes = doc_prefixes
+        self.doc_prefix = doc_prefix
 
         if remove_history:
-            self.delete_documents_by_doc_prefix(self.doc_prefixes)
-        self.set_prompt_schema()
+            self.delete_documents_by_doc_prefix(self.doc_prefix)
 
-    def _get_prompt_id(self, id_, doc_prefix="memory"):
+    def _get_memory_id(self, id_, doc_prefix="memory"):
         doc_prefix = doc_prefix.lower()
-        assert doc_prefix in self.doc_prefixes, "doc_prefix must be memory or prompt!"
-        set_doc_prefix = doc_prefix if doc_prefix.endswith(":") else doc_prefix + ":"
 
+        if id_.split(":")[0] in self.doc_prefix:
+            return id_
+        set_doc_prefix = doc_prefix if doc_prefix.endswith(":") else doc_prefix + ":"
+        id_ = id_[1:] if id_.startswith(":") else id_
         return f"{set_doc_prefix}{id_}"
 
-    def set_prompt(self, prompt: str, data_id, doc_prefix="memory"):
-        self._set_single_prompt(data_id=data_id,
-                                prompt_data=prompt,
+    def set_memory(self, document: dict, data_id: str, doc_prefix="memory"):
+        self._set_single_memory(data_id=data_id,
+                                document=document,
                                 doc_prefix=doc_prefix)
 
-    def _set_single_prompt(self, data_id, prompt_data: str, doc_prefix="memory", pipeline=None):
-        document = {
-            self.prompt_field_name: prompt_data
-        }
+    def _set_single_memory(self, data_id, document, doc_prefix="memory", pipeline=None):
+        prompt_key = self._get_memory_id(data_id, doc_prefix)
 
-        prompt_key = self._get_prompt_id(data_id, doc_prefix)
         if pipeline:
             pipeline.hset(prompt_key, mapping=document)
-            pipeline.ft(self.index_name).add_document(prompt_key, **document, replace=True)
         else:
             self.redis_conn.hset(prompt_key, mapping=document)
-            self.redis_conn.ft(self.index_name).add_document(prompt_key, **document, replace=True)
             logging.info(f"Prompt {prompt_key} added !")
 
     def insert_conversation(self, prompt_datum: List[ChatModelResponse], data_id, doc_prefix="memory"):
@@ -291,37 +285,33 @@ class RedisPrompt(RedisClient):
                 else:
                     llm_answer = data.content
 
-                self._set_single_prompt(data_id=data_key,
-                                        prompt_data=llm_answer,
+                prompt_tokens_usage = data.prompt_tokens_usage
+                completion_tokens_usage = data.completion_tokens_usage
+
+                document = {
+                    "role": agent_role,
+                    "answer": llm_answer,
+                    "prompt_tokens_usage": prompt_tokens_usage,
+                    "completion_tokens_usage": completion_tokens_usage
+                }
+
+                self._set_single_memory(data_id=data_key,
+                                        document=document,
                                         doc_prefix=doc_prefix,
                                         pipeline=pipeline)
             pipeline.execute()
 
         except Exception as e:
-            db_info = self.get_information_by_index_name(self.index_name)
-            num_docs, num_failure = db_info["num_docs"], db_info["hash_indexing_failures"]
-            logging.error(f"Error in set_prompt : {e}, num_docs : {num_docs}, num_failure : {num_failure}")
+            logging.error(f"Error in insert_conversation : {e}")
             raise
 
-    def set_prompt_schema(self):
+    def retrieve_memory(self, data_id, field_name, doc_prefix="memory"):
+        """
+        :param field_name: one of role, answer, prompt_tokens_usage, completion_tokens_usage
+        """
+        data_id_for_search = self._get_memory_id(data_id, doc_prefix)
         try:
-            self.redis_conn.ft(self.index_name).info()
-            logging.info(f"{self.index_name} Index already exists ! ")
-
-        except Exception as e:
-            schema = (
-                TextField(self.prompt_field_name),
-            )
-            definition = IndexDefinition(prefix=self.doc_prefixes, index_type=IndexType.HASH)
-            self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
-            self.redis_conn.ft(self.index_name).config_set("default_dialect", 2)
-
-            logging.info(f"Index {self.index_name} created !")
-
-    def get_prompt(self, data_id, doc_prefix="memory"):
-        data_id_for_search = self._get_prompt_id(data_id, doc_prefix)
-        try:
-            prompt_value = self.redis_conn.hget(data_id_for_search, self.prompt_field_name)
+            prompt_value = self.redis_conn.hget(data_id_for_search, field_name)
             if prompt_value:
                 return prompt_value.decode("utf-8")
             else:
@@ -331,19 +321,21 @@ class RedisPrompt(RedisClient):
             logging.error(f"Error in get_prompt : {e}")
             raise
 
-    def get_prompt_json(self, data_id, doc_prefix="memory"):
-        data_id_for_search = self._get_prompt_id(data_id, doc_prefix)
-        try:
-            serialised_data = self.redis_conn.get(data_id_for_search)
-            if serialised_data:
-                return json.loads(serialised_data)  # 문자열을 다시 JSON 객체로 변환
-            else:
-                logging.info(f"Prompt {data_id} not found !")
-        except Exception as e:
-            logging.error(f"Error in get_prompt_json : {e}")
-            raise
+    def get_keys_by_ids_with_lua(self, data_ids):
+        """
+        :param data_ids: 데이터베이스에 저장된 데이터가 있는지 확인
+        :return: list of keys
+        """
+        lua_script = """
+        local keys = {}
+        for _, data_id in ipairs(ARGV) do
+            local key = "memory:student:" .. data_id .. ":2"
+            if redis.call("exists", key) == 1 then
+                table.insert(keys, key)
+            end
+        end
+        return keys
+        """
 
-
-if __name__ == "__main__":
-    prompt_client = RedisPrompt()
-    # print(prompt_client)
+        keys = self.redis_conn.eval(lua_script, 0, *data_ids)
+        return [key.decode('utf-8') for key in keys]
