@@ -92,7 +92,7 @@ class TokenMismatchError(Exception):
 
 
 def retry_api(
-        num_retries: int = 2,
+        num_retries: int = 5,
         backoff_base: float = 2.0,
         warn_user: bool = True,
 ):
@@ -109,6 +109,7 @@ def retry_api(
         RateLimitError: f"{Fore.RED}Error: Reached rate limit, passing...{Fore.RESET}",
         JSONDecodeError: f"{Fore.RED}Error: Failed to decode JSON response, passing...{Fore.RESET}",
         TokenMismatchError: f"{Fore.RED}Error: Mismatch between question tokens and response tokens, passing...{Fore.RESET}",
+        KeyError: f"{Fore.RED}Error: Key error, passing...{Fore.RESET}",
     }
 
     json_decode_error_msg = (
@@ -131,9 +132,9 @@ def retry_api(
                 try:
                     return func(*args, **kwargs)
 
-                except (JSONDecodeError, RateLimitError, ServiceUnavailableError, TokenMismatchError) as e:
+                except (JSONDecodeError, RateLimitError, ServiceUnavailableError, TokenMismatchError, KeyError) as e:
                     if attempt == num_retries:
-                        if isinstance(e, (JSONDecodeError, TokenMismatchError)):
+                        if isinstance(e, (JSONDecodeError, TokenMismatchError, KeyError)):
                             logger.error(f"Max retries reached. Returning empty value due to {type(e).__name__}.")
                             return False
                         else:
@@ -147,6 +148,10 @@ def retry_api(
                         user_warned = True
 
                     if isinstance(e, TokenMismatchError):
+                        logger.error(f"{error_msg} - attempt {attempt} of {num_retries}")
+                        user_warned = True
+
+                    if isinstance(e, KeyError):
                         logger.error(f"{error_msg} - attempt {attempt} of {num_retries}")
                         user_warned = True
 
@@ -197,7 +202,7 @@ def create_chat_completion(
 
     if role == "student":
         import json
-        check_json_decode_error = json.loads(completion.choices[0].message.function_call["arguments"])
+        check_json_decode_error = json.loads(completion.choices[0].message.function_call.arguments)
 
         if len(question_tokens) != len(check_json_decode_error["response"]):
             raise TokenMismatchError("Mismatch between question tokens and response tokens.")
