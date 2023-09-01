@@ -27,24 +27,6 @@ def uncertainty_sampling_multi_models(trainers: dict, dataset, id_to_label, trai
 
     return uncertainty_ids, average_disagreement_rate
 
-
-def get_existing_file_ids(indices: list, data_dir: str, dataset_name: str, return_abs_path=True):
-    dataset_dir = os.path.join(data_dir, dataset_name)
-    os.makedirs(dataset_dir, exist_ok=True)
-    llm_file_dir = glob.glob(os.path.join(dataset_dir, "*.json"))
-
-    results = [id_ for id_ in indices if os.path.join(dataset_dir, f"{dataset_name}-{id_}.json") in llm_file_dir]
-
-    if return_abs_path:
-        results = [file_path for id_ in indices
-                   if (file_path := os.path.join(dataset_dir, f"{dataset_name}-{id_}.json")) in llm_file_dir]
-
-    if results:
-        return results
-
-    return []
-
-
 def match_indices_from_base_dataset(base_dataset, indices_to_find, remove=True):
     """
     Returns the indices to keep from the full indices list
@@ -66,34 +48,18 @@ def match_indices_from_base_dataset(base_dataset, indices_to_find, remove=True):
     return filtered_base_dataset
 
 
-def extract_dataset_by_random_sampling(dataset, n_samples=100, return_only_indices=False):
+def extract_dataset_by_random_sampling(base_dataset, n_samples=100, return_only_indices=False):
+    """
+    base_dataset에서 n_samples개만큼 랜덤 추출
+    :param base_dataset: 오라벨 데이터셋 전체
+    :param n_samples: 오라벨 데이터셋에서 랜덤으로 추출할 데이터 개수
+    :param return_only_indices: 데이터셋은 제외하고 인덱스만 추출하려고 할 시 TRUE
+    :return:
+    """
     import numpy as np
-    sample_indices = np.random.choice(dataset["id"], n_samples, replace=False)
+    sample_indices = np.random.choice(base_dataset["id"], n_samples, replace=False)
     if return_only_indices:
         return sample_indices
 
-    random_dataset = match_indices_from_base_dataset(dataset, sample_indices, remove=False)
+    random_dataset = match_indices_from_base_dataset(base_dataset, sample_indices, remove=False)
     return sample_indices, random_dataset
-
-
-def llm_data_file_tobe_dataset(file_indices: list, data_dir: str, dataset_name: str):
-    existed_files_abs_path: list = get_existing_file_ids(indices=file_indices, data_dir=data_dir,
-                                                         dataset_name=dataset_name, return_abs_path=True)
-
-    logging.info(
-        f"{llm_data_file_tobe_dataset.__name__}: ===== Existed llm results: {len(existed_files_abs_path)} =====")
-    all_tokens = 0
-    dataset_list = []
-    for file_path in existed_files_abs_path:
-        data = read_json(file_path)
-        if "random_ner_tags" not in data.keys():
-            if "ner_tags" in data.keys():
-                data['random_ner_tags'] = data.pop('ner_tags')
-            else:
-                continue
-        # TODO: Message로 변경해야함 !
-        all_tokens += count_message_tokens(text=str(data["tokens"]), dataset_name=dataset_name)
-        dataset_list.append(data)
-
-    if dataset_list:
-        return Dataset.from_list(dataset_list), all_tokens
