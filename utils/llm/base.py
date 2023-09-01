@@ -150,8 +150,8 @@ class LLMResponse:
     """Standard response struct for a response from an LLM model."""
 
     model_info: ModelInfo
-    prompt_tokens_used: int = 0
-    completion_tokens_used: int = 0
+    prompt_tokens_usage: int = 0
+    completion_tokens_usage: int = 0
 
 
 @dataclass
@@ -184,16 +184,10 @@ class OpenAIFunctionCall:
 @dataclass
 class ChatModelResponse(LLMResponse):
     """Standard response struct for a response from an LLM model."""
-
+    role: str = "student"
+    data_id: str = ""
     content: Optional[str] = None
-    function_call: Union[EntityAgentResponse, FeedbackAgentResponse] = None
-
-
-class FeedbackAgentResponse(BaseModel):
-    response: List[str]
-
-    def raw(self) -> MessageDict:
-        return {"response": self.response}
+    function_call: Union[EntityAgentResponse] = None
 
 
 @dataclass
@@ -203,7 +197,7 @@ class EntityAgentResponse:
     ner_tags: List[str]
 
     def raw(self) -> MessageDict:
-        return {"tokens": self.tokens, "ner_tags": self.ner_tags}
+        return {"id": self.data_id, "tokens": self.tokens, "ner_tags": self.ner_tags}
 
     def __post_init__(self):
         if len(self.tokens) != len(self.ner_tags):
