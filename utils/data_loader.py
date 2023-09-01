@@ -17,7 +17,8 @@ class NerProcessor:
         self.args = args
         self.mode = args.data_mode
         self.dataset_name = f"eunbincosmos/{self.args.dataset_name}-{self.args.dataset_lang}"
-        cached_file_name = f"cached-{self.dataset_name}_{self.args.data_mode}-seq_len_{self.args.max_seq_length}"
+
+        cached_file_name = f"cached-{self.args.dataset_name}-{self.args.dataset_lang}_{self.args.data_mode}-seq_len_{self.args.max_seq_length}"
         if "/" in cached_file_name:
             cached_file_name = cached_file_name.replace("/", "_")
 
@@ -64,8 +65,13 @@ class NerProcessor:
         self.raw_dataset = load_dataset(self.dataset_name)
 
         add_idx = partial(self.add_id, prefix=f"{self.args.dataset_name}:{self.args.dataset_lang}")
+
         self.raw_dataset = self.raw_dataset if "id" in self.raw_dataset["train"].features else \
             self.raw_dataset.map(add_idx, with_indices=True)
+
+        if ("tags" in self.raw_dataset["train"].column_names and
+                "ner_tags" not in self.raw_dataset["train"].column_names):
+            self.raw_dataset = self.raw_dataset.rename_column("tags", "ner_tags")
 
         required_columns = ['id', 'tokens', 'ner_tags']
         for split in self.raw_dataset.keys():
@@ -92,8 +98,8 @@ class NerProcessor:
 
             # train_dataset은 실 답, pool_dataset은 에러가 섞인 값
             initial_train_dataset = self.train_dataset.select(train_indices)
-            if self.mode != "original":
-                initial_train_dataset = initial_train_dataset.rename_column("ner_tags", "random_ner_tags")
+            # if self.mode != "original":
+            #     initial_train_dataset = initial_train_dataset.rename_column("ner_tags", "random_ner_tags")
 
             pool_dataset = self.train_dataset.select(pool_indices)
             pool_dataset = self.apply_mode(pool_dataset)
@@ -142,7 +148,7 @@ class NerProcessor:
     def make_unlabelled(self, example):
         ner_tags = example["ner_tags"]
         no_entity = [self.ignore_entity for _ in ner_tags]
-        example["random_ner_tags"] = no_entity
+        example["ner_tags"] = no_entity
 
         return example
 
@@ -157,7 +163,7 @@ class NerProcessor:
             random.randint(self.start_tag, self.end_tag + 1) if tag != self.ignore_entity else self.ignore_entity
             for tag
             in ner_tags]
-        example["random_ner_tags"] = random_entity
+        example["ner_tags"] = random_entity
 
         return example
 
@@ -169,7 +175,7 @@ class NerProcessor:
         ner_tags = example["ner_tags"]
         # 0이상 len(labels) - 1 이하
         random_tags = [random.randint(a=0, b=len(self.labels) - 1) for _ in range(len(ner_tags))]
-        example["random_ner_tags"] = random_tags
+        example["ner_tags"] = random_tags
 
         return example
 
@@ -216,7 +222,7 @@ def make_random_partial_entity(dataset, counted_target_entity):
             mixed_entity[entity_idx][idx] = random.choice(possible_values)
             counted_target_entity -= 1
 
-    return dataset.add_column("random_ner_tags", mixed_entity)
+    return dataset.add_column("ner_tags", mixed_entity)
 
 
 def check_ratio_of_changed_entity(dataset):
