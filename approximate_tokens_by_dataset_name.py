@@ -12,7 +12,7 @@ from utils.llm.base import MessageFunctionCall
 from utils.llm.base import Message
 from utils.trainer import ModelTrainer, calculate_threshold
 
-from utils.database.redis_client import RedisVector, RedisPrompt
+from utils.database.redis_client import RedisVector, RedisLLMResponse
 from utils.llm.agent import Student, get_similar_dataset, get_example
 from utils.llm.token_counter import count_message_tokens, count_string_tokens
 
@@ -53,8 +53,8 @@ def get_token_usage(example):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name", type=str, default="polyglot",
-                        choices=["wikiann", "polyglot", "tner/mit_restaurant"])
+    parser.add_argument("--dataset_name", type=str, default="bionlp2004",
+                        choices=["wikiann", "polyglot", "mit_restaurant", "mit_movie_trivia", "bionlp2004"])
 
     parser.add_argument("--dataset_lang", type=str, default="en",
                         choices=["ko", "en", "ja", "pl", "id"])
@@ -80,8 +80,8 @@ if __name__ == "__main__":
     label_list = processor.labels
 
     db_client = RedisVector(dataset_title_value=args.dataset_name, dataset_lang_value=args.dataset_lang)
-    prompt_client = RedisPrompt()
-    with open("config.yaml", "r") as f:
+    prompt_client = RedisLLMResponse()
+    with open("config.yaml") as f:
         agent_config = EasyDict(yaml.safe_load(f))
     peer = Student(config=agent_config, db_client=prompt_client,
                    dataset_name=args.dataset_name, dataset_lang=args.dataset_lang)
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     teacher_keys = db_client.get_all_key_by_pattern("memory*1")
     teacher_keys = list(map(lambda x: ":".join(x.split(":")[1:]), teacher_keys))
 
-    feedbacks = [prompt_client.get_prompt(key) for key in teacher_keys]
+    feedbacks = [prompt_client.retrieve_memory(key) for key in teacher_keys]
     token_counts = [count_string_tokens(feedback, "gpt-3.5-turbo-0613") for feedback in feedbacks]
 
     # peer2 답변
@@ -135,4 +135,7 @@ if __name__ == "__main__":
     print(f"Input cost: {input_values_summary * 0.0000015:,}")
     print(f"Output cost: {output_values_summary * 0.000002:,}")
     print("=" * 50)
-    print(f"Total cost: {input_values_summary * 0.0000015 + output_values_summary * 0.000002:,}")
+    total_cost = input_values_summary * 0.0000015 + output_values_summary * 0.000002
+    print(f"Total cost: {round(total_cost, 2):,}")
+    total_30 = total_cost * 0.3
+    print(f"30% of Total cost: {round(total_30, 2):,}")
