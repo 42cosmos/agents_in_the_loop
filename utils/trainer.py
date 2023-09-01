@@ -172,7 +172,7 @@ class EarlyStoppingCallbackWithCheck(EarlyStoppingCallback):
             self.num_bad_epochs = 0
 
         self.info_logger.info(
-            f"Current {self.model_name}'s {metric_to_check} score: {metric_value}, Number of bad epoch: {self.num_bad_epochs}")
+            f"{self.model_name} {metric_to_check} score: {round(metric_value, 2)}, Number of bad epoch: {self.num_bad_epochs}")
 
         # 조기 종료 체크
         if self.num_bad_epochs >= self.early_stopping_patience:
@@ -293,6 +293,9 @@ class ModelTrainer(Trainer):
 
     def get_embeddings(self, dataset):
         self.logger.info("Get Embedding values of initial train dataset")
+        if "input_ids" not in dataset.column_names:
+            dataset = self.tokenize_dataset(dataset)
+
         device = "cuda" if torch.cuda.is_available() else "cpu"
         input_ids = torch.tensor(dataset["input_ids"]).to(device)
         token_type_ids = torch.tensor(dataset["token_type_ids"]).to(device)
@@ -330,9 +333,9 @@ class ModelTrainer(Trainer):
         self.train_dataset = self.train_dataset.shuffle(seed=self.model_args.seed)
         self.logger.info(f"Updated train dataset Length is {len(self.train_dataset)}")
 
-    def tokenize_dataset(self, dataset, label_column_name=None):
+    def tokenize_dataset(self, dataset, label_column_name=None, column_names=None):
         label_column_name = label_column_name if label_column_name else self.data_args.label_column_name
-        col_names = dataset.column_names
+        col_names = column_names if column_names else dataset.column_names
         encode_fn = partial(tokenize_and_align_labels,
                             tokenizer=self.tokenizer,
                             label_column_name=label_column_name,
@@ -343,7 +346,6 @@ class ModelTrainer(Trainer):
                            load_from_cache_file=False,
                            batched=True,
                            remove_columns=col_names,
-                           desc=f"Running tokenizer on raw dataset",
                            )
 
 
