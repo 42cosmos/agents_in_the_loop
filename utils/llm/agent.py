@@ -21,7 +21,7 @@ from .base import (
     ChatModelResponse,
     OpenAIFunctionCall,
     MessageFunctionCall,
-    FeedbackAgentResponse, EntityAgentResponse
+    EntityAgentResponse, ChatSequence
 )
 
 from .token_counter import count_message_tokens
@@ -88,9 +88,8 @@ class Agent:
         self.max_conversation_limit = self.config.max_conversation_limit
         self.history = MessageHistory(self)
 
-        system_prompt_key_for_redis = f"{self.role}:base_system"
-        self.system_prompt: str = self.db_client.get_prompt(data_id=system_prompt_key_for_redis,
-                                                            doc_prefix="prompt")
+        system_prompt_key_for_redis = f"prompt:{self.role}:base_system"
+        self.system_prompt: str = self.db_client.get_value(system_prompt_key_for_redis)
 
         self.logger = logging.getLogger("openai")
         if self.system_prompt is None:
@@ -103,21 +102,18 @@ class Agent:
         openai.api_key = self.api_key
 
         self.organisation_key = os.getenv("ORGANISATION_KEY")
+        assert self.organisation_key is not None, "Please set ORGANISATION_KEY in .env file"
         if self.organisation_key:
             openai.organization = self.organisation_key
 
     def _get_basic_prompt(self):
-        information = self.db_client.get_prompt(data_id=f"{self.dataset_name}:{LANGUAGES[self.dataset_lang]}",
-                                                doc_prefix="prompt")
+        information = self.db_client.get_value(f"prompt:{self.dataset_name}:{LANGUAGES[self.dataset_lang]}")
         warning_sign = ""
         if self.role == "student":
-            warning_sign = self.db_client.get_prompt(data_id=f"warning",
-                                                     doc_prefix="prompt")
+            warning_sign = self.db_client.get_value(f"prompt:warning")
 
         elif self.role == "teacher":
-            warning_sign = self.db_client.get_prompt(data_id=f"teacher:warning",
-                                                     doc_prefix="prompt")
-
+            warning_sign = self.db_client.get_value(f"prompt:teacher:warning")
         return f"{information}\n{warning_sign}"
 
     # def get_cost(self, data_id, answers: List[ChatModelResponse]):
@@ -130,12 +126,30 @@ class Agent:
     #         # self.api_cost_accumulated += api_cost
     #     logging.info(f"Total cost of {data_id} conversation is {self.api_cost_accumulated} tokens")
 
-    def _get_prompt(self, triggering_prompt):
-        return [Message("system", self.system_prompt),
+    def _get_test_prompt(self, triggering_prompt, examples: MessageFunctionCall = None):
+        """
+        Message 예시를 보여주는 코드, main 에서는 사용되지 않는다
+        :param triggering_prompt:
+        :return:
+        """
+
+        message_sequence = ChatSequence.for_model(
+            self.config.model_name,
+            [
+                Message("system", self.system_prompt),
                 Message("user", self.ner_guidance),
-                Message("user", triggering_prompt)]
+                Message("user", triggering_prompt)
+            ],
+        )
+
+        if examples is None:
+            return message_sequence
+
+        message_sequence.append(examples)
+        return message_sequence
 
     def create_chat_with_agent(self,
+                               raw_question_data,
                                user_sentence,
                                function_call_examples=None,
                                expected_return_tokens: int = 0):
@@ -147,6 +161,7 @@ class Agent:
 
         assistant_reply = chat_with_agent(
             agent=self,
+            raw_question_data=raw_question_data,
             system_prompt=self.system_prompt,
             llm_guidance=self.ner_guidance,
             triggering_prompt=user_sentence,
@@ -160,15 +175,15 @@ class Teacher(Agent):
     def __init__(self, config, db_client, dataset_name, dataset_lang):
         super().__init__("teacher", config, db_client, dataset_name, dataset_lang)
 
-    def give_feedback(self, student_reply, problem_sentence: list):
+    def give_feedback(self, raw_data, student_reply):
         if student_reply is None:
-            prompt = f"""There is no answer given by the student.\n Question Sentence: {str(problem_sentence)}"""
+            prompt = f"""There is no answer given by the student.\n Question Sentence: {raw_data["tokens"]}"""
 
         else:
             problem_sentence = student_reply.tokens
             student_answer = student_reply.ner_tags
             prompt = f"""Here's the sentence in which the student has to find the entity, and the answer given by the student:\nQuestion Sentence: {str(problem_sentence)}\nStudent's Answer: "{student_answer}" """.strip()
-        assistant_reply = self.create_chat_with_agent(prompt)
+        assistant_reply = self.create_chat_with_agent(raw_question_data=raw_data, user_sentence=prompt)
 
         return assistant_reply
 
@@ -182,44 +197,43 @@ class Student(Agent):
                                dataset_lang=dataset_lang)
 
     def talk_to_agent(self,
-                      data_id,
-                      request_tokens: list,
-                      similar_example: List[MessageFunctionCall],
+                      raw_data,
+                      db_prompt_client,
+                      similar_examples=None,
                       get_feedback=False,
                       save_db=True):
-
-        prompt = str(request_tokens)
-        get_predicted_token_usage = count_expected_tokens(request_tokens)
-
-        answers = [self.create_chat_with_agent(prompt,
-                                               function_call_examples=similar_example,
+        assert (save_db and db_prompt_client is not None), "Please set db_client if you want to save the conversation"
+        get_predicted_token_usage = count_expected_tokens(raw_data["tokens"])
+        answers = [self.create_chat_with_agent(user_sentence=str(raw_data["tokens"]),
+                                               raw_question_data=raw_data,
+                                               function_call_examples=similar_examples,
                                                expected_return_tokens=get_predicted_token_usage)]  # student 1
 
         if get_feedback:
-            student_first_answer = answer_to_data(data_id, answers[0])
-            teachers_feedback = self.teacher.give_feedback(student_first_answer,
-                                                           problem_sentence=request_tokens)
+            student_first_answer = answer_to_data(answers[0])
+            teachers_feedback = self.teacher.give_feedback(raw_data=raw_data,
+                                                           student_reply=student_first_answer)
 
-            final_answer = self._finalise_reply(question_sentence=request_tokens,
+            final_answer = self._finalise_reply(raw_data=raw_data,
                                                 initial_answer=student_first_answer.ner_tags,
                                                 teacher_feedback=teachers_feedback.content,
-                                                function_call_examples=similar_example)
+                                                function_call_examples=similar_examples)
 
             answers.extend([teachers_feedback, final_answer])
 
-        # self.get_cost(answers)
-
         if save_db:
-            self.db_client.insert_conversation(prompt_datum=answers, data_id=data_id)
+            db_prompt_client.insert_conversation(answers)
 
         return answers
 
-    def _finalise_reply(self, question_sentence, initial_answer, teacher_feedback, function_call_examples):
-        combined_prompt = f"""The Question Sentence is: {question_sentence}
+    def _finalise_reply(self, raw_data, initial_answer, teacher_feedback, function_call_examples):
+        combined_prompt = f"""The Question Sentence is: {raw_data["tokens"]}
 Your initial answer is: {initial_answer}
 Peer Review: {teacher_feedback}
 Please write your final answer. But you don't have to follow the Review if you're confident with your original answer."""
-        final_reply = self.create_chat_with_agent(combined_prompt, function_call_examples=function_call_examples)
+        final_reply = self.create_chat_with_agent(raw_question_data=raw_data,
+                                                  user_sentence=combined_prompt,
+                                                  function_call_examples=function_call_examples)
         return final_reply
 
     # def total_api_cost(self):
@@ -233,8 +247,8 @@ def get_similar_dataset(db_client, dataset, model_name, vector, data_id, num=2):
         logging.info("There is no similar data")
         return None
     data_ids = [key.split(f"{model_name}:")[-1] for key in similar_keys if key.split(":")[-1] != data_id.split(":")[-1]]
-    # 자기 자신은 없지만 3개가 나올 때
-    data_ids = data_ids[:num + 1] if len(data_ids) > num else data_ids
+    # 자기 자신은 없지만 num개가 나올 때
+    data_ids = data_ids[:num] if len(data_ids) > num else data_ids
     result: Dataset = match_indices_from_base_dataset(dataset, data_ids, remove=False)
     return result.select([i for i in range(num)])
 
@@ -274,18 +288,43 @@ def make_example(example, id_to_label=None):
     return {"response": [{"word": token, "entity": tag} for token, tag in zip(tokens, ner_tags)]}
 
 
-def answer_to_data(data_id, answer):
-    arguments_return = answer.function_call.arguments
-    retval_json = json.loads(arguments_return)
-    # TODO: keyError 시 대응 방안
+def answer_to_data(answer, label_to_id=None, data_id=None):
+    fail_result = None, []
+    retry_datum = fail_result[1]
+
+    json_response = {"response": [{"entity": "", "word": ""}]}
+    if data_id:
+        json_response = json.loads(answer)
+
+    else:
+        data_id = answer.data_id
+        if answer.function_call:
+            json_response = json.loads(answer.function_call.arguments)
     try:
-        response = retval_json["response"]
+        response = json_response["response"]
+        try:
+            temp_entity = [i["entity"] for i in response]
+            temp_word = [i["word"] for i in response]
+        except KeyError as key_error:
+            logging.error(f"KeyError in {data_id}: {key_error}")
+            retry_datum.append(data_id)
+            return fail_result
+        except ValueError as value_error:
+            logging.error(f"ValueError in {data_id}: {value_error}")
+            retry_datum.append(data_id)
+            return fail_result
+
     except KeyError as key_error:
         logging.error(f"KeyError in {data_id}: {key_error}")
-        return {"response": [
-            {"entity": "", "word": ""}
-        ]}
+        return fail_result
 
-    entities, words = zip(*[(entity_dict['entity'], entity_dict['word'])
-                            for entity_dict in response])
-    return EntityAgentResponse(data_id=data_id, tokens=list(words), ner_tags=list(entities))
+    if label_to_id:
+        entities, words = zip(*[
+            (label_to_id[entity_dict['entity']] if entity_dict['entity'] in label_to_id else label_to_id["O"],
+             entity_dict['word'])
+            for entity_dict in response
+        ])
+        return EntityAgentResponse(data_id=data_id, tokens=list(words), ner_tags=list(entities)), retry_datum
+
+    entities, words = zip(*[(entity_dict['entity'], entity_dict['word']) for entity_dict in response])
+    return EntityAgentResponse(data_id=data_id, tokens=list(words), ner_tags=list(entities)), retry_datum
