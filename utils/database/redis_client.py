@@ -4,6 +4,7 @@ import os
 from typing import List
 
 import redis
+from colorama import Fore
 from redis.commands.search.field import (
     VectorField,
     TagField,
@@ -15,7 +16,7 @@ from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 
 from dotenv import load_dotenv
 
-from utils.llm.base import OpenAIFunctionCall, MessageFunctionCall, ChatModelResponse
+from utils.llm.base import ChatModelResponse
 
 
 class RedisClient:
@@ -33,13 +34,14 @@ class RedisClient:
         password = os.getenv("REDIS_PASSWORD", None)
         assert password, "REDIS_PASSWORD is not set !"
 
+        self.logger = logging.getLogger(__class__.__qualname__)
         self.redis_conn = redis.Redis(host=host, port=port, db=db, password=password)
 
     def get_all_key_by_pattern(self, pattern='*'):
         try:
             return [key.decode('utf-8') for key in self.redis_conn.keys(pattern)]
         except Exception as e:
-            logging.error(f"Error in get_all_key_by_pattern: {e}")
+            self.logger.error(f"Error in get_all_key_by_pattern: {e}")
             raise
 
     def get_values_by_key_pattern(self, pattern):
@@ -71,7 +73,7 @@ class RedisClient:
         try:
             return self.redis_conn.delete(key)
         except Exception as e:
-            logging.error(f"Error in delete_key: {e}")
+            self.logger.error(f"Error in delete_key: {e}")
             raise
 
     def delete_documents_by_doc_prefix(self, doc_prefix=None):
@@ -86,16 +88,16 @@ class RedisClient:
                 results = self.get_all_key_by_pattern(f"{doc_prefix}*")
                 for doc_id in results:
                     self.redis_conn.delete(doc_id)
-                logging.info(f"Deleted {len(results)} documents from {doc_prefix}")
+                self.logger.info(f"Deleted {len(results)} documents from {doc_prefix}")
             if isinstance(doc_prefix, list):
                 for prefix in doc_prefix:
                     results = self.get_all_key_by_pattern(f"{prefix}*")
                     for doc_id in results:
                         self.redis_conn.delete(doc_id)
-                    logging.info(f"Deleted {len(results)} documents from {prefix}")
+                    self.logger.info(f"Deleted {len(results)} documents from {prefix}")
 
         except Exception as e:
-            logging.error(f"Error in delete_documents_by_index_name: {e}")
+            self.logger.error(f"Error in delete_documents_by_index_name: {e}")
             raise
 
 
@@ -113,7 +115,7 @@ class RedisVector(RedisClient):
                  remove_history=False
                  ):
         super().__init__()
-
+        self.logger = logging.getLogger(__class__.__qualname__)
         self.dataset_field_name = dataset_field_name
         self.dataset_title_value = dataset_title_value
 
@@ -139,7 +141,7 @@ class RedisVector(RedisClient):
         try:
             return self.redis_conn.ft(index_name).info()
         except Exception as e:
-            logging.error(f"Error in get_information_by_index_name: {e}")
+            self.logger.error(f"Error in get_information_by_index_name: {e}")
             raise
 
     def _get_id_key(self, model_name, data_id):
@@ -155,7 +157,7 @@ class RedisVector(RedisClient):
                                        vector=vector, pipeline=pipeline)
         pipeline.execute()
 
-        logging.info(f"Inserted {len(ids)} vectors !")
+        self.logger.info(f"Inserted {len(ids)} vectors !")
 
     def _insert_single_vector(self, model_name, data_id, vector, pipeline=None):
         document = {
@@ -176,7 +178,7 @@ class RedisVector(RedisClient):
     def set_schema(self, algorithm="HNSW", distance_metric="L2"):
         try:
             self.redis_conn.ft(self.index_name).info()
-            logging.info(f"{self.index_name} Index already exists ! ")
+            self.logger.info(f"{Fore.GREEN}{self.index_name}{Fore.RESET} Index already exists ! ")
 
         except:
             schema = (
@@ -193,7 +195,7 @@ class RedisVector(RedisClient):
 
             self.redis_conn.ft(self.index_name).create_index(fields=schema, definition=definition)
             self.redis_conn.ft(self.index_name).config_set("default_dialect", 2)
-            logging.info(f"Index {self.index_name} created !")
+            self.logger.info(f"Index {self.index_name} created !")
 
     def get_vector(self, model_name, data_id, field_name="embedding"):
         """
@@ -205,7 +207,7 @@ class RedisVector(RedisClient):
         try:
             return self.redis_conn.hget(data_key_for_redis, field_name)
         except Exception as e:
-            logging.error(f"Error in get_vector: {e}")
+            self.logger.error(f"Error in get_vector: {e}")
             raise
 
     def search_similar_vector_by_data_id(self, model_name, vector, num=10):
@@ -219,7 +221,7 @@ class RedisVector(RedisClient):
         try:
             res = self.redis_conn.ft(self.index_name).search(q, query_params=vector_params)
         except Exception as e:
-            logging.error(f"Error in search_similar_vector_by_data_id: {e}")
+            self.logger.error(f"Error in search_similar_vector_by_data_id: {e}")
             raise
         # 데이터셋 아이디만 추출
         doc_ids = [doc.id for doc in res.docs]
@@ -231,7 +233,7 @@ class RedisLLMResponse(RedisClient):
                  index_name: str = "conversation_memory",
                  doc_prefix=None,
                  remove_history=False):
-
+        self.logger = logging.getLogger(__class__.__qualname__)
         super().__init__()
 
         if doc_prefix is None:
@@ -264,24 +266,32 @@ class RedisLLMResponse(RedisClient):
             pipeline.hset(prompt_key, mapping=document)
         else:
             self.redis_conn.hset(prompt_key, mapping=document)
-            logging.info(f"Prompt {prompt_key} added !")
+            self.logger.info(f"Prompt {prompt_key} added !")
 
-    def insert_conversation(self, prompt_datum: List[ChatModelResponse], data_id, doc_prefix="memory"):
+    def insert_conversation(self, prompt_datum: List[ChatModelResponse], doc_prefix="memory"):
         """
         :param prompt_datum: Model Responses in List
-        :param data_id: data_id of train data
         :param doc_prefix: memory or prompt
         """
         try:
             pipeline = self.redis_conn.pipeline()
 
-            for idx, data in enumerate(prompt_datum):
-                # 첫 번째와 세 번째 대답은 학생
-                agent_role = "student" if idx % 2 == 0 else "teacher"
-                data_key = f"{agent_role}:{data_id}:{idx}"
+            for idx, data in enumerate(prompt_datum, 1):
+                agent_role = data.role
+                response_index = idx % 3 or 3
+                data_key = f"{agent_role}:{data.data_id}:{response_index}"
+
+                # 조건 검사
+                if agent_role == "student":
+                    assert response_index in [1, 3], f"Invalid response_index {response_index} for student"
+                elif agent_role == "teacher":
+                    assert response_index == 2, f"Invalid response_index {response_index} for teacher"
+
+                llm_answer = "null"
 
                 if agent_role == "student":
-                    llm_answer = data.function_call.arguments
+                    if data.function_call:
+                        llm_answer = data.function_call.arguments
                 else:
                     llm_answer = data.content
 
@@ -302,7 +312,7 @@ class RedisLLMResponse(RedisClient):
             pipeline.execute()
 
         except Exception as e:
-            logging.error(f"Error in insert_conversation : {e}")
+            self.logger.error(f"Error in insert_conversation : {e}")
             raise
 
     def retrieve_memory(self, data_id, field_name, doc_prefix="memory"):
@@ -315,10 +325,10 @@ class RedisLLMResponse(RedisClient):
             if prompt_value:
                 return prompt_value.decode("utf-8")
             else:
-                logging.info(f"Prompt {data_id} not found !")
+                self.logger.info(f"Prompt {data_id} not found !")
 
         except Exception as e:
-            logging.error(f"Error in get_prompt : {e}")
+            self.logger.error(f"Error in get_prompt : {e}")
             raise
 
     def get_keys_by_ids_with_lua(self, data_ids):
@@ -329,7 +339,7 @@ class RedisLLMResponse(RedisClient):
         lua_script = """
         local keys = {}
         for _, data_id in ipairs(ARGV) do
-            local key = "memory:student:" .. data_id .. ":2"
+            local key = "memory:student:" .. data_id .. ":3"
             if redis.call("exists", key) == 1 then
                 table.insert(keys, key)
             end
