@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 def create_chat_completion(
         agent,
+        raw_question_data,
         prompt: ChatSequence,
         used_tokens: Optional[int],
         functions: Optional[List[OpenAIFunctionSpec]] = None,
@@ -47,9 +48,6 @@ def create_chat_completion(
     if model_max_tokens - reserved_tokens <= 0:
         model_max_tokens += int(reserved_tokens / 2)
 
-    logging.info(
-        f"used_tokens:: {count_message_tokens(prompt)} - model_max_tokens:: {model_max_tokens} - reserved_tokens:: {reserved_tokens}")
-
     logger.debug(
         f"{Fore.GREEN}Creating chat completion with model {model}, max_tokens {model_max_tokens}{Fore.RESET}"
     )
@@ -64,16 +62,19 @@ def create_chat_completion(
         for function in functions:
             logger.debug(f"Function dicts: {function['name']}")
 
+    logger.info(f"{raw_question_data['id']} is being processed...")
     response = openai_chat_completion(
         role=agent.role,
         messages=prompt.raw(),
+        question_tokens=raw_question_data["tokens"],
         **chat_completion_kwargs,
     )
+
     if not response:
         return ChatModelResponse(
+            role=agent.role,
+            data_id=raw_question_data["id"],
             model_info=model,
-            content=None,
-            function_call=None,
         )
 
     if hasattr(response, "error"):
@@ -84,19 +85,29 @@ def create_chat_completion(
     content: str | None = first_message.get("content")
     function_call = first_message.get("function_call")
 
+    prompt_token_usage = response.get("usage").get("prompt_tokens")
+    completion_token_usage = response.get("usage").get("completion_tokens")
+    logger.info(
+        f"{agent.role}=>{raw_question_data['id']}: used_tokens -> {prompt_token_usage + completion_token_usage}")
+
     return ChatModelResponse(
+        role=agent.role,
         model_info=model,
+        data_id=raw_question_data["id"],
         content=content,
         function_call=function_call,
+        prompt_tokens_usage=prompt_token_usage,
+        completion_tokens_usage=completion_token_usage
     )
 
 
 def chat_with_agent(agent,
+                    raw_question_data: dict,
                     system_prompt: str,
                     llm_guidance: str,
                     triggering_prompt: str,
                     use_functions: bool = True,
-                    function_call_examples: List[MessageFunctionCall] = None,
+                    function_call_examples: List[str] = None,
                     expected_return_tokens: int = 0,
                     ):
     config = agent.config
@@ -119,8 +130,6 @@ def chat_with_agent(agent,
     functions = []
     if role == "student":
         functions.append(ner_gpt_function)
-    # elif role == "teacher":
-    #     functions.append(teacher_response_function.to_dict())
 
     if not use_functions and function_call_examples:
         raise "You can not use functions without function_call_examples"
@@ -133,11 +142,11 @@ def chat_with_agent(agent,
     message_sequence.append(user_input_msg)
 
     send_token_limit = count_message_tokens(message_sequence.messages)
-    send_token_limit += 60  # 53 in the functions --> InvalidRequestError
-    # However, you requested 4150 tokens (649 in the messages, 53 in the functions, and 3448 in the completion)
+    send_token_limit += 60  # 60 tokens for safety
 
     assistant_reply = create_chat_completion(
         agent=agent,
+        raw_question_data=raw_question_data,
         prompt=message_sequence,
         functions=functions,
         used_tokens=send_token_limit,
@@ -145,7 +154,7 @@ def chat_with_agent(agent,
     )
 
     # Update full message history
-    agent.history.append(user_input_msg)
+    agent.history.append(message_sequence.messages[-1])
     agent.history.add("assistant", assistant_reply, assistant_reply.function_call)
 
     return assistant_reply
