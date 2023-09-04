@@ -78,11 +78,24 @@ class TokenThrottling(Throttling):
             self.tokens = min(self.rate, self.tokens)
             self.token_bucket = min(self.token_rate, self.token_bucket)
 
-            # 토큰이 충분하지 않으면 0, 그렇지 않으면 토큰을 소비하고 소비한 토큰의 개수를 반환
-            if self.tokens < amount or self.token_bucket < tokens:
-                return 0
+            # 토큰이 충분해질 때까지 대기
+            while self.tokens < amount or self.token_bucket < tokens:
+                time.sleep(60)  # 60초 대기
+                now = time.time()
+                elapsed = now - self.timestamp
+                token_elapsed = now - self.token_last
 
-            else:
-                self.tokens -= amount
-                self.token_bucket -= tokens
-                return amount
+                if elapsed * self.rate > 1:
+                    self.tokens += elapsed * self.rate
+                    self.timestamp = now
+
+                if token_elapsed * self.token_rate > 1:
+                    self.token_bucket += token_elapsed * self.token_rate
+                    self.token_last = now
+
+                self.tokens = min(self.rate, self.tokens)
+                self.token_bucket = min(self.token_rate, self.token_bucket)
+
+            self.tokens -= amount
+            self.token_bucket -= tokens
+            return amount
