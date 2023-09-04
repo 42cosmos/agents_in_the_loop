@@ -13,8 +13,6 @@ from openai.openai_object import OpenAIObject
 import openai.api_resources.abstract.engine_api_resource as engine_api_resource
 from openai.error import APIError, RateLimitError, ServiceUnavailableError, Timeout
 
-logger = logging.getLogger(__name__)
-
 OPEN_AI_CHAT_MODELS = {
     info.name: info
     for info in [
@@ -22,44 +20,42 @@ OPEN_AI_CHAT_MODELS = {
             name="gpt-3.5-turbo-0301",
             prompt_token_cost=0.0015,
             completion_token_cost=0.002,
-            max_tokens=4096
+            max_tokens=4096,
+            TPM=500000,
+            RPM=6000
         ),
         ChatModelInfo(
             name="gpt-3.5-turbo-0613",
             prompt_token_cost=0.0015,
             completion_token_cost=0.002,
             max_tokens=4096,
+            TPM=500000,
+            RPM=6000
         ),
         ChatModelInfo(
             name="gpt-3.5-turbo-16k-0613",
             prompt_token_cost=0.003,
             completion_token_cost=0.004,
             max_tokens=16384,
+            TPM=180000,
+            RPM=3500
         ),
         ChatModelInfo(
             name="gpt-4-0314",
             prompt_token_cost=0.03,
             completion_token_cost=0.06,
             max_tokens=8192,
+            TPM=10000,
+            RPM=200
         ),
         ChatModelInfo(
             name="gpt-4-0613",
             prompt_token_cost=0.03,
             completion_token_cost=0.06,
             max_tokens=8192,
-        ),
-        ChatModelInfo(
-            name="gpt-4-32k-0314",
-            prompt_token_cost=0.06,
-            completion_token_cost=0.12,
-            max_tokens=32768,
-        ),
-        ChatModelInfo(
-            name="gpt-4-32k-0613",
-            prompt_token_cost=0.06,
-            completion_token_cost=0.12,
-            max_tokens=32768,
-        ),
+            TPM=10000,
+            RPM=200
+        )
     ]
 }
 
@@ -103,6 +99,10 @@ def retry_api(
         backoff_base float: Base for exponential backoff. Defaults to 2.
         warn_user bool: Whether to warn the user. Defaults to True.
     """
+
+    logger = logging.getLogger(f"{retry_api.__name__}")
+    logger.setLevel(logging.DEBUG)
+
     from json.decoder import JSONDecodeError
     error_messages: dict = {
         ServiceUnavailableError: f"{Fore.RED}Error: The OpenAI API engine is currently overloaded, passing...{Fore.RESET}",
@@ -195,6 +195,9 @@ def create_chat_completion(
         OpenAIObject: The ChatCompletion response from OpenAI
 
     """
+    logger = logging.getLogger(f"{create_chat_completion.__name__}")
+    logger.setLevel(logging.DEBUG)
+
     completion = openai.ChatCompletion.create(
         messages=messages,
         **kwargs,
