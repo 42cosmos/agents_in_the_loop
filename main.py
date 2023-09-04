@@ -355,10 +355,6 @@ if __name__ == "__main__":
                 trainer_dict["early_stopped"] = True
                 logging.info(f"{Fore.BLUE}>>>>> {model_name} is early stopped <<<<<{Fore.RESET}")
 
-            # learning rate 확인 ? TODO: 확인 필요
-            # for param_group in trainer.optimizer.param_groups:
-            #     param_group['lr'] = 2e-5
-
             eval_result = trainer.evaluate()
             current_score = round(eval_result["eval_f1"], 4)
             # 각 모델의 현재 점수 확인 및 while 루프의 조건 확인
