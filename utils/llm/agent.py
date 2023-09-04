@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
 import os
+import json
 import logging
 import logging.config
-from json.decoder import JSONDecodeError
 from typing import List
 
 from colorama import Fore
@@ -18,13 +17,14 @@ from .chat import chat_with_agent
 from .base import (
     Message,
     MessageRole,
-    ChatModelResponse,
     OpenAIFunctionCall,
     MessageFunctionCall,
     EntityAgentResponse, ChatSequence
 )
+from .openai import OPEN_AI_CHAT_MODELS
 
 from .token_counter import count_message_tokens
+from ..throttling import TokenThrottling
 
 logger = logging.getLogger(f"{__name__}")
 
@@ -80,6 +80,9 @@ class Agent:
 
         self.ner_guidance = self._get_basic_prompt()
 
+        self.logger = logging.getLogger(f"{self.role}")
+        self.logger.setLevel(logging.INFO)
+
         assert dataset_lang in LANGUAGES, f"dataset_lang should be one of {LANGUAGES.keys()}"
 
         self.api_cost_accumulated = 0.0
@@ -91,7 +94,7 @@ class Agent:
         system_prompt_key_for_redis = f"prompt:{self.role}:base_system"
         self.system_prompt: str = self.db_client.get_value(system_prompt_key_for_redis)
 
-        self.logger = logging.getLogger("openai")
+        self.logger = logging.getLogger("Agent")
         if self.system_prompt is None:
             raise ValueError(f"Please set system_prompt for {self.role} agent")
 
@@ -116,17 +119,7 @@ class Agent:
             warning_sign = self.db_client.get_value(f"prompt:teacher:warning")
         return f"{information}\n{warning_sign}"
 
-    # def get_cost(self, data_id, answers: List[ChatModelResponse]):
-    #     cost = 0.0
-    #     for answer in answers:
-    #         # input_cost_per_tokens = answer.model_info.prompt_token_cost
-    #         # output_cost_per_tokens = answer.model_info.completion_token_cost
-    #
-    #         # cost += api_cost
-    #         # self.api_cost_accumulated += api_cost
-    #     logging.info(f"Total cost of {data_id} conversation is {self.api_cost_accumulated} tokens")
-
-    def _get_test_prompt(self, triggering_prompt, examples: MessageFunctionCall = None):
+    def _get_test_basic_prompt(self, triggering_prompt, examples: List[MessageFunctionCall] = None):
         """
         Message 예시를 보여주는 코드, main 에서는 사용되지 않는다
         :param triggering_prompt:
@@ -151,13 +144,10 @@ class Agent:
     def create_chat_with_agent(self,
                                raw_question_data,
                                user_sentence,
-                               function_call_examples=None,
+                               function_call_examples: List[MessageFunctionCall] = None,
+                               throttling: TokenThrottling = None,
                                expected_return_tokens: int = 0):
         assert user_sentence, "Please set your question"
-
-        if function_call_examples is not None:
-            assert isinstance(function_call_examples, list)
-            assert all([isinstance(example, MessageFunctionCall) for example in function_call_examples])
 
         assistant_reply = chat_with_agent(
             agent=self,
@@ -166,7 +156,8 @@ class Agent:
             llm_guidance=self.ner_guidance,
             triggering_prompt=user_sentence,
             function_call_examples=function_call_examples,
-            expected_return_tokens=expected_return_tokens
+            expected_return_tokens=expected_return_tokens,
+            throttling=throttling
         )
         return assistant_reply
 
@@ -174,16 +165,20 @@ class Agent:
 class Teacher(Agent):
     def __init__(self, config, db_client, dataset_name, dataset_lang):
         super().__init__("teacher", config, db_client, dataset_name, dataset_lang)
+        self.logger = logging.getLogger(__class__.__qualname__)
 
-    def give_feedback(self, raw_data, student_reply):
-        if student_reply is None:
+    def give_feedback(self, raw_data, student_reply, throttling: TokenThrottling = None):
+        if student_reply is None or student_reply.tokens is None:
+            self.logger.info(f"{raw_data['id']} has no answer")
             prompt = f"""There is no answer given by the student.\n Question Sentence: {raw_data["tokens"]}"""
 
         else:
             problem_sentence = student_reply.tokens
             student_answer = student_reply.ner_tags
             prompt = f"""Here's the sentence in which the student has to find the entity, and the answer given by the student:\nQuestion Sentence: {str(problem_sentence)}\nStudent's Answer: "{student_answer}" """.strip()
-        assistant_reply = self.create_chat_with_agent(raw_question_data=raw_data, user_sentence=prompt)
+        assistant_reply = self.create_chat_with_agent(raw_question_data=raw_data,
+                                                      user_sentence=prompt,
+                                                      throttling=throttling)
 
         return assistant_reply
 
@@ -196,6 +191,13 @@ class Student(Agent):
                                dataset_name=dataset_name,
                                dataset_lang=dataset_lang)
 
+        self.logger = logging.getLogger(__class__.__qualname__)
+        model_info = OPEN_AI_CHAT_MODELS[self.config.model_name]
+        # https://platform.openai.com/account/rate-limits
+        request_per_second = model_info.RPM / 60
+        token_per_second = model_info.TPM / 60
+        self.throttling = TokenThrottling(rate=request_per_second, token_rate=token_per_second)
+
     def talk_to_agent(self,
                       raw_data,
                       db_prompt_client,
@@ -204,40 +206,48 @@ class Student(Agent):
                       save_db=True):
         assert (save_db and db_prompt_client is not None), "Please set db_client if you want to save the conversation"
         get_predicted_token_usage = count_expected_tokens(raw_data["tokens"])
+
+        self.logger.info(f"Processing example: {raw_data['id']}")
         answers = [self.create_chat_with_agent(user_sentence=str(raw_data["tokens"]),
                                                raw_question_data=raw_data,
                                                function_call_examples=similar_examples,
-                                               expected_return_tokens=get_predicted_token_usage)]  # student 1
+                                               expected_return_tokens=get_predicted_token_usage,
+                                               throttling=self.throttling)]  # student 1
 
         if get_feedback:
-            student_first_answer = answer_to_data(answers[0])
+            student_first_answer, _ = answer_to_data(answers[0])
             teachers_feedback = self.teacher.give_feedback(raw_data=raw_data,
-                                                           student_reply=student_first_answer)
+                                                           student_reply=student_first_answer,
+                                                           throttling=self.throttling)
 
             final_answer = self._finalise_reply(raw_data=raw_data,
                                                 initial_answer=student_first_answer.ner_tags,
                                                 teacher_feedback=teachers_feedback.content,
-                                                function_call_examples=similar_examples)
+                                                function_call_examples=similar_examples,
+                                                throttling=self.throttling)
 
             answers.extend([teachers_feedback, final_answer])
-
         if save_db:
             db_prompt_client.insert_conversation(answers)
+            self.logger.info(f"{raw_data['id']} stored in DB")
 
         return answers
 
-    def _finalise_reply(self, raw_data, initial_answer, teacher_feedback, function_call_examples):
+    def _finalise_reply(self,
+                        raw_data,
+                        initial_answer,
+                        teacher_feedback,
+                        function_call_examples,
+                        throttling: TokenThrottling = None):
         combined_prompt = f"""The Question Sentence is: {raw_data["tokens"]}
 Your initial answer is: {initial_answer}
 Peer Review: {teacher_feedback}
 Please write your final answer. But you don't have to follow the Review if you're confident with your original answer."""
         final_reply = self.create_chat_with_agent(raw_question_data=raw_data,
                                                   user_sentence=combined_prompt,
-                                                  function_call_examples=function_call_examples)
+                                                  function_call_examples=function_call_examples,
+                                                  throttling=throttling)
         return final_reply
-
-    # def total_api_cost(self):
-    #     return self.api_cost_accumulated + self.teacher.api_cost_accumulated
 
 
 def get_similar_dataset(db_client, dataset, model_name, vector, data_id, num=2):
@@ -253,14 +263,14 @@ def get_similar_dataset(db_client, dataset, model_name, vector, data_id, num=2):
     return result.select([i for i in range(num)])
 
 
-def count_expected_tokens(tokens: list):
+def count_expected_tokens(tokens: list, return_token_count: bool = True):
     ner_tags = ["XYZ"] * len(tokens)
     dummy_example = {"response":
                          [{"word": token, "entity": tag} for token, tag in zip(tokens, ner_tags)]
                      }
-    return count_message_tokens([MessageFunctionCall(role="function",
-                                                     name="find_ner",
-                                                     content=dummy_example)])
+    if return_token_count:
+        return count_message_tokens([MessageFunctionCall(role="function", name="find_ner", content=dummy_example)])
+    return MessageFunctionCall(role="function", name="find_ner", content=dummy_example)
 
 
 def get_example(dataset, id_to_label=None, function_name="find_ner"):
@@ -289,6 +299,11 @@ def make_example(example, id_to_label=None):
 
 
 def answer_to_data(answer, label_to_id=None, data_id=None):
+    logger_name = f"{answer_to_data.__name__}"
+    if data_id:
+        logger_name += f"-{data_id}"
+
+    logger = logging.getLogger(logger_name)
     fail_result = None, []
     retry_datum = fail_result[1]
 
@@ -306,16 +321,16 @@ def answer_to_data(answer, label_to_id=None, data_id=None):
             temp_entity = [i["entity"] for i in response]
             temp_word = [i["word"] for i in response]
         except KeyError as key_error:
-            logging.error(f"KeyError in {data_id}: {key_error}")
+            logger.error(f"KeyError in {data_id}: {key_error}")
             retry_datum.append(data_id)
             return fail_result
         except ValueError as value_error:
-            logging.error(f"ValueError in {data_id}: {value_error}")
+            logger.error(f"ValueError in {data_id}: {value_error}")
             retry_datum.append(data_id)
             return fail_result
 
     except KeyError as key_error:
-        logging.error(f"KeyError in {data_id}: {key_error}")
+        logger.error(f"KeyError in {data_id}: {key_error}")
         return fail_result
 
     if label_to_id:
