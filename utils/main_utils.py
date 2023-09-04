@@ -7,12 +7,15 @@ import torch
 from datasets import Dataset
 
 from utils.utils import read_json
-from utils.trainer import communicate_models_for_uncertainty
+from utils.trainer import communicate_models_for_uncertainty, get_original_labels
 
 from utils.llm.token_counter import count_message_tokens
 
 
-def uncertainty_sampling_multi_models(trainers: dict, dataset, id_to_label, training_threshold) -> Tuple[list, float]:
+def uncertainty_sampling_multi_models(trainers: dict,
+                                      id_to_label: dict,
+                                      dataset: Dataset,
+                                      training_threshold: float) -> Tuple[list, float, dict]:
     model_predictions = []
     for model_name, trainer_dict in trainers.items():
         trainer = trainer_dict["trainer"]
@@ -20,12 +23,24 @@ def uncertainty_sampling_multi_models(trainers: dict, dataset, id_to_label, trai
             prediction_output = trainer.get_predictions(dataset)
             model_predictions.append(prediction_output)
 
-    uncertainty_ids, average_disagreement_rate = communicate_models_for_uncertainty(*model_predictions,
-                                                                                    id_to_label=id_to_label,
-                                                                                    threshold=training_threshold)
+    uncertainty_ids, average_disagreement_rate, certainty_id_dict = \
+        communicate_models_for_uncertainty(*model_predictions,
+                                           id_to_label=id_to_label,
+                                           threshold=training_threshold)
+
+    first_tokenizer = trainers[list(trainers.keys())[0]].trainer.tokenizer
+    certainty_datum = []
+    for key, predicts in certainty_id_dict.items():
+        predict_labels = get_original_labels(**predicts, id_to_label=id_to_label, tokenizer=first_tokenizer)
+        if len(predicts["tokens"]) == len(predict_labels):
+            certainty_datum.append({"id": key, "tokens": predicts["tokens"], "ner_tags": predict_labels})
+
+    certainty_dataset = Dataset.from_list(certainty_datum, features=dataset.features)
+
     # DESCRIPTION: average_disagreement_rate: 평균적으로 첫 번째 모델의 예측에 비해 다른 모델들이 average_disagreement_rate% 불일치한다는 것
 
-    return uncertainty_ids, average_disagreement_rate
+    return uncertainty_ids, average_disagreement_rate, certainty_dataset
+
 
 def match_indices_from_base_dataset(base_dataset, indices_to_find, remove=True):
     """
