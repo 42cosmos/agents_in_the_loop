@@ -328,6 +328,11 @@ def answer_to_data(answer, label_to_id=None, data_id=None):
             logger.error(f"ValueError in {data_id}: {value_error}")
             retry_datum.append(data_id)
             return fail_result
+        except TypeError as type_error:
+            # LLM이 word와 entity 를 반대로 작성하는 경우가 종종 있음
+            logger.error(f"TypeError in {data_id}: {type_error}")
+            retry_datum.append(data_id)
+            return fail_result
 
     except KeyError as key_error:
         logger.error(f"KeyError in {data_id}: {key_error}")
