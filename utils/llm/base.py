@@ -64,6 +64,8 @@ class CompletionModelInfo(ModelInfo):
 @dataclass
 class ChatModelInfo(CompletionModelInfo):
     """Struct for chat model information."""
+    TPM: int
+    RPM: int
 
 
 @dataclass
