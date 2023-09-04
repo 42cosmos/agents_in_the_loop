@@ -8,16 +8,12 @@ from easydict import EasyDict
 
 from utils.data_loader import NerProcessor
 from utils.arguments import DataTrainingArguments
-from utils.llm.base import MessageFunctionCall
-from utils.llm.base import Message
-from utils.trainer import ModelTrainer, calculate_threshold
-
+from utils.llm.base import MessageFunctionCall, Message
 from utils.database.redis_client import RedisVector, RedisLLMResponse
-from utils.llm.agent import Student, get_similar_dataset, get_example
+from utils.llm.agent import Student, get_example
 from utils.llm.token_counter import count_message_tokens, count_string_tokens
 
 import warnings
-from functools import partial
 from utils.llm.agent import LANGUAGES
 warnings.filterwarnings("ignore")
 

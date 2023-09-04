@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from colorama import Fore, Style
 
-from .base import ChatModelInfo, MessageDict
+from utils.llm.base import ChatModelInfo, MessageDict
 
 from openai.openai_object import OpenAIObject
 import openai.api_resources.abstract.engine_api_resource as engine_api_resource

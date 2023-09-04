@@ -13,18 +13,18 @@ from dataclasses import dataclass, field
 
 import openai
 
-from .chat import chat_with_agent
-from .base import (
+from utils.llm.chat import chat_with_agent
+from utils.llm.base import (
     Message,
     MessageRole,
     OpenAIFunctionCall,
     MessageFunctionCall,
     EntityAgentResponse, ChatSequence
 )
-from .openai import OPEN_AI_CHAT_MODELS
+from utils.llm.openai import OPEN_AI_CHAT_MODELS
 
-from .token_counter import count_message_tokens
-from ..throttling import TokenThrottling
+from utils.llm.token_counter import count_message_tokens
+from utils.throttling import TokenThrottling
 
 logger = logging.getLogger(f"{__name__}")
 

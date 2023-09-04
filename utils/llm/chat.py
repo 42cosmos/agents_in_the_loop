@@ -5,21 +5,21 @@ import time
 from typing import Optional, List
 from colorama import Fore
 
-from .base import (
+from utils.llm.base import (
     Message,
     ChatSequence,
     ChatModelResponse,
 )
 
-from .openai import (
+from utils.llm.openai import (
     OpenAIFunctionSpec,
     OPEN_AI_CHAT_MODELS,
     ner_gpt_function,
     create_chat_completion as openai_chat_completion
 )
 
-from .token_counter import count_message_tokens
-from ..throttling import TokenThrottling
+from utils.llm.token_counter import count_message_tokens
+from utils.throttling import TokenThrottling
 
 logger = logging.getLogger(__name__)
 

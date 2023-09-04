@@ -24,8 +24,8 @@ from transformers import (
     DataCollatorForTokenClassification
 )
 
-from .metric import Metrics
-from .arguments import ModelArguments
+from utils.metric import Metrics
+from utils.arguments import ModelArguments
 
 
 @dataclass

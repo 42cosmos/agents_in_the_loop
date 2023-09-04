@@ -108,7 +108,7 @@ class ChatSequence:
 
     @classmethod
     def for_model(cls, model_name: str, messages: list[Message] | ChatSequence = []):
-        from .openai import OPEN_AI_CHAT_MODELS
+        from utils.llm.openai import OPEN_AI_CHAT_MODELS
 
         if not model_name in OPEN_AI_CHAT_MODELS:
             raise ValueError(f"Unknown chat model '{model_name}'")
@@ -122,7 +122,7 @@ class ChatSequence:
 
     @property
     def token_length(self):
-        from .token_counter import count_message_tokens
+        from utils.llm.token_counter import count_message_tokens
 
         return count_message_tokens(self.messages, self.model.name)
 

@@ -5,7 +5,7 @@ from typing import List
 
 import tiktoken
 
-from .base import Message
+from utils.llm.base import Message
 
 
 def count_message_tokens(

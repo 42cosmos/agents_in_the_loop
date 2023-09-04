@@ -1,16 +1,9 @@
-import os
-import glob
-import logging
 from typing import Tuple
 
 import torch
 from datasets import Dataset
 
-from utils.utils import read_json
 from utils.trainer import communicate_models_for_uncertainty, get_original_labels
-
-from utils.llm.token_counter import count_message_tokens
-
 
 def uncertainty_sampling_multi_models(trainers: dict,
                                       id_to_label: dict,
