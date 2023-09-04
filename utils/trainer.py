@@ -11,7 +11,7 @@ import transformers
 import transformers.utils.logging
 from datasets import concatenate_datasets
 from dataclasses import dataclass
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Union
 
 from transformers import (
     set_seed,
@@ -30,11 +30,13 @@ from .arguments import ModelArguments
 
 @dataclass
 class CustomPredictionOutput:
-    predictions: List[Any]
-    label_ids: List[Any]
+    predictions: np.ndarray
+    label_positions: np.ndarray
     input_ids: List[Any]
     metrics: Any
-    ids: List[Any]
+    ids: List[str]
+    tokens: Union[str, None] = None
+    offset_mapping: Union[np.ndarray, None] = None
 
 
 def calculate_match_rate(ref_pred, pred, id_to_label):
@@ -59,13 +61,13 @@ def calculate_match_rate(ref_pred, pred, id_to_label):
 
 # start_threshold부터 시작하여 num_bad_epochs가 average_patience에 도달할 때까지 점진적으로 threshold 값을 증가
 def calculate_threshold(start: float, end: float, current_step: int, total_steps: int) -> float:
-    return min(start + (end - start) * (current_step / total_steps), end)
+    return start + (end - start) * (current_step / total_steps)
 
 
 def communicate_models_for_uncertainty(*model_outputs: CustomPredictionOutput,
                                        id_to_label: dict,
                                        threshold: float = 0.5,
-                                       ) -> Tuple[List[Any], float]:
+                                       ) -> Tuple[List[Any], float, dict]:
     """
     모델의 예측 값들을 비교하여 불확실성을 계산하는 함수8
     disagreement_count:  다른 모델의 예측과 첫 번째 모델의 예측이 다른 경우의 수를 세는 변수
@@ -76,30 +78,60 @@ def communicate_models_for_uncertainty(*model_outputs: CustomPredictionOutput,
     assert model_outputs, "No model outputs provided for uncertainty calculation"
     total_predictions = len(model_outputs)
     assert total_predictions > 1, "At least two models are required or put * before the model outputs"
-
+    ref_model = model_outputs[0]
     ref_predictions = model_outputs[0].predictions  # (100, 256, 9) 100개의 문장, 256개의 토큰, 9개의 태그
     ref_ids = model_outputs[0].ids
 
     disagreement_count = 0
     total_count = len(ref_predictions)  # 예제 문장 수, ref_predictions의 첫 번째 차원의 크기
     disagreement_ids = []
+    agreement_id_dict = {}
+
     for output in model_outputs[1:]:
         # 각 예측 쌍에 대해 일치하지 않는 경우에만 아이디를 추가하는 방식
+        # 한 예측 쌍에 대해 불일치가 여러 번 발생해도 아이디는 한 번만 추가되도록 set을 사용
         temp_disagreement_ids = set()
-        for ref_pred, pred, ref_id in zip(ref_predictions, output.predictions, ref_ids):
+        for idx, (ref_pred, pred, ref_id) in enumerate(zip(ref_predictions, output.predictions, ref_ids)):
             # match_rate 일치하는 비율
             match_rate = calculate_match_rate(ref_pred, pred, id_to_label)
             if match_rate <= threshold:
                 disagreement_count += 1
                 temp_disagreement_ids.add(ref_id)
-                # 한 예측 쌍에 대해 불일치가 여러 번 발생해도 아이디는 한 번만 추가되도록 set을 사용
+            else:
+                agreement_id_dict[ref_id] = {"predictions": ref_pred,
+                                             "tokens": ref_model.tokens[idx],
+                                             "label_positions": ref_model.label_positions[idx],
+                                             "offset_mapping": ref_model.offset_mapping[idx]}
         disagreement_ids.extend(temp_disagreement_ids)
 
     # DESCRIPTION: average_disagreement_rate이 클 수록 모델 간 예측이 자주 일치하지 않음 -> 불확실성이 높음
     # DESCRIPTION: 작을 수록 모델 간 예측이 자주 일치함 -> 불확실성이 낮음
     # DESCRIPTION: 여러 모델의 예측이 얼마나 일관성을 갖는지를 나타내는 지표
     average_disagreement_rate = disagreement_count / total_count / (total_predictions - 1)
-    return disagreement_ids, average_disagreement_rate
+    return disagreement_ids, average_disagreement_rate, agreement_id_dict
+
+
+def get_original_labels(tokens, predictions, label_positions, offset_mapping, id_to_label, tokenizer):
+    # 가장 높은 확률을 가진 클래스의 인덱스를 찾습니다.
+    predicted_ids = np.argmax(predictions, axis=-1)
+    tokenized_tokens = tokenizer.tokenize(" ".join(tokens))
+
+    # 인덱스를 레이블로 변환합니다.
+    predicted_labels = [id_to_label[pred] for label, pred in zip(label_positions, predicted_ids) if
+                        label != -100]
+
+    original_labels = []
+    label_positions = label_positions[1:len(tokenized_tokens) + 1]
+    offset_mapping = offset_mapping[1:len(tokenized_tokens) + 1]
+    special_tokens = tokenizer.all_special_tokens
+    label_idx = 0  # predicted_labels의 인덱스를 추적하기 위한 변수
+    for label, offset, token in zip(label_positions, offset_mapping, tokenized_tokens):
+        if (token not in special_tokens) and (
+                offset[0] == 0 and offset[1] != 0):
+            if label != -100:
+                original_labels.append(predicted_labels[label_idx])
+                label_idx += 1  # predicted_labels의 인덱스를 증가시킵니다.
+    return original_labels
 
 
 # def communicate_models_for_uncertainty(*model_outputs: CustomPredictionOutput,
@@ -292,7 +324,6 @@ class ModelTrainer(Trainer):
         )
 
     def get_embeddings(self, dataset):
-        self.logger.info("Get Embedding values of initial train dataset")
         if "input_ids" not in dataset.column_names:
             dataset = self.tokenize_dataset(dataset)
 
@@ -313,9 +344,11 @@ class ModelTrainer(Trainer):
         predictions = self.predict(tokenized_dataset)
 
         custom_prediction_output = CustomPredictionOutput(predictions=predictions.predictions,
-                                                          label_ids=predictions.label_ids,
-                                                          input_ids=tokenized_dataset["input_ids"],
+                                                          label_positions=predictions.label_ids,
                                                           metrics=predictions.metrics,
+                                                          offset_mapping=tokenized_dataset["offset_mapping"],
+                                                          input_ids=tokenized_dataset["input_ids"],
+                                                          tokens=tokenized_dataset["tokens"],
                                                           ids=dataset["id"])
 
         return custom_prediction_output
@@ -344,8 +377,7 @@ class ModelTrainer(Trainer):
                             max_seq_length=self.data_args.max_seq_length)
         return dataset.map(encode_fn,
                            load_from_cache_file=False,
-                           batched=True,
-                           remove_columns=col_names,
+                           batched=True
                            )
 
 
@@ -362,6 +394,7 @@ def tokenize_and_align_labels(examples,
         padding=pad_to_max_length,
         max_length=max_seq_length,
         return_token_type_ids=True if model_type in ["bert", "xlm"] else False,
+        return_offsets_mapping=True,
     )
 
     all_labels = examples[label_column_name]
