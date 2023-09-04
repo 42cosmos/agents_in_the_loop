@@ -1,3 +1,4 @@
+import logging
 import time
 from threading import Lock
 
@@ -51,6 +52,7 @@ class TokenThrottling(Throttling):
         self.token_rate = token_rate
         self.token_bucket = 0
         self.token_last = None
+        self.logger = logging.getLogger(f"{TokenThrottling.__name__}")
 
     def consume_with_tokens(self, tokens, amount=1):
         with self._consume_lock:
@@ -81,6 +83,7 @@ class TokenThrottling(Throttling):
             # 토큰이 충분해질 때까지 대기
             while self.tokens < amount or self.token_bucket < tokens:
                 time.sleep(60)  # 60초 대기
+                self.logger.info(f"Waiting for tokens to be refilled...")
                 now = time.time()
                 elapsed = now - self.timestamp
                 token_elapsed = now - self.token_last
