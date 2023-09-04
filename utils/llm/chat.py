@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional, List
 from colorama import Fore
 
@@ -8,7 +9,6 @@ from .base import (
     Message,
     ChatSequence,
     ChatModelResponse,
-    MessageFunctionCall,
 )
 
 from .openai import (
@@ -19,6 +19,7 @@ from .openai import (
 )
 
 from .token_counter import count_message_tokens
+from ..throttling import TokenThrottling
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ def chat_with_agent(agent,
                     use_functions: bool = True,
                     function_call_examples: List[str] = None,
                     expected_return_tokens: int = 0,
+                    throttling: TokenThrottling = None
                     ):
     config = agent.config
     model = config.model_name
@@ -143,6 +145,13 @@ def chat_with_agent(agent,
 
     send_token_limit = count_message_tokens(message_sequence.messages)
     send_token_limit += 60  # 60 tokens for safety
+
+    # Throttling 적용
+    if throttling:
+        num_tokens_to_comsume = send_token_limit + expected_return_tokens
+        while not throttling.consume_with_tokens(tokens=num_tokens_to_comsume):
+            time.sleep(1)
+            logger.info(f"{Fore.RED}Waiting for tokens to be refilled...{Fore.RESET}")
 
     assistant_reply = create_chat_completion(
         agent=agent,
