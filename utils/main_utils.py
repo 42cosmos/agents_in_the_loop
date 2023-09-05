@@ -1,14 +1,15 @@
-from typing import Tuple
+from typing import Tuple, List, Any, Optional
 
 import torch
 from datasets import Dataset
 
 from utils.trainer import communicate_models_for_uncertainty, get_original_labels
 
+
 def uncertainty_sampling_multi_models(trainers: dict,
                                       id_to_label: dict,
                                       dataset: Dataset,
-                                      training_threshold: float) -> Tuple[list, float, dict]:
+                                      training_threshold: float) -> tuple[list[Any], float, Optional[Dataset]]:
     model_predictions = []
     for model_name, trainer_dict in trainers.items():
         trainer = trainer_dict["trainer"]
@@ -21,17 +22,19 @@ def uncertainty_sampling_multi_models(trainers: dict,
                                            id_to_label=id_to_label,
                                            threshold=training_threshold)
 
-    first_tokenizer = trainers[list(trainers.keys())[0]].trainer.tokenizer
-    certainty_datum = []
-    for key, predicts in certainty_id_dict.items():
-        predict_labels = get_original_labels(**predicts, id_to_label=id_to_label, tokenizer=first_tokenizer)
-        if len(predicts["tokens"]) == len(predict_labels):
-            certainty_datum.append({"id": key, "tokens": predicts["tokens"], "ner_tags": predict_labels})
+    certainty_dataset = None
+    if certainty_id_dict:
+        first_tokenizer = trainers[list(trainers.keys())[0]].trainer.tokenizer
+        certainty_datum = []
+        for key, predicts in certainty_id_dict.items():
+            predict_labels = get_original_labels(**predicts, id_to_label=id_to_label, tokenizer=first_tokenizer)
+            if len(predicts["tokens"]) == len(predict_labels):
+                certainty_datum.append({"id": key, "tokens": predicts["tokens"], "ner_tags": predict_labels})
 
-    certainty_dataset = Dataset.from_list(certainty_datum)
+        certainty_dataset = Dataset.from_list(certainty_datum, features=dataset.features)
 
     # DESCRIPTION: average_disagreement_rate: 평균적으로 첫 번째 모델의 예측에 비해 다른 모델들이 average_disagreement_rate% 불일치한다는 것
-    return uncertainty_ids, average_disagreement_rate, certainty_dataset.cast(dataset.features)
+    return uncertainty_ids, average_disagreement_rate, certainty_dataset
 
 
 def match_indices_from_base_dataset(base_dataset, indices_to_find, remove=True):
