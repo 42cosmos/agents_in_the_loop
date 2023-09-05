@@ -179,10 +179,10 @@ class EarlyStoppingCallbackWithCheck(EarlyStoppingCallback):
         self.model_name = model_name
 
         self.logger = logging.getLogger("transformers.early_stopping_callback")
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG)
 
         self.info_logger = logging.getLogger(f"{model_name} Early Stopping Callback")
-        self.info_logger.setLevel(logging.INFO)
+        self.info_logger.setLevel(logging.DEBUG)
 
     def on_evaluate(self, args, state, control, metrics, **kwargs):
         metric_to_check = args.metric_for_best_model

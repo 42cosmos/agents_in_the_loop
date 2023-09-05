@@ -204,7 +204,7 @@ def create_chat_completion(
 
     """
     logger = logging.getLogger(f"{create_chat_completion.__name__}")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     completion = openai.ChatCompletion.create(
         messages=messages,

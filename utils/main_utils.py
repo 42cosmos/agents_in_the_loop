@@ -31,8 +31,7 @@ def uncertainty_sampling_multi_models(trainers: dict,
     certainty_dataset = Dataset.from_list(certainty_datum)
 
     # DESCRIPTION: average_disagreement_rate: 평균적으로 첫 번째 모델의 예측에 비해 다른 모델들이 average_disagreement_rate% 불일치한다는 것
-
-    return uncertainty_ids, average_disagreement_rate, certainty_dataset
+    return uncertainty_ids, average_disagreement_rate, certainty_dataset.cast(dataset.features)
 
 
 def match_indices_from_base_dataset(base_dataset, indices_to_find, remove=True):

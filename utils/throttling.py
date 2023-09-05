@@ -53,7 +53,7 @@ class TokenThrottling(Throttling):
         self.token_bucket = 0
         self.token_last = None
         self.logger = logging.getLogger(f"{TokenThrottling.__name__}")
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG)
 
     def consume_with_tokens(self, tokens, amount=1):
         with self._consume_lock:
