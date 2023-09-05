@@ -22,7 +22,7 @@ from utils.llm.token_counter import count_message_tokens
 from utils.throttling import TokenThrottling
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 def create_chat_completion(
         agent,
@@ -50,7 +50,7 @@ def create_chat_completion(
         model_max_tokens += int(reserved_tokens / 2)
 
     logger.debug(
-        f"{Fore.GREEN}Creating chat completion with model {model}, max_tokens {model_max_tokens}{Fore.RESET}"
+        f"{Fore.GREEN}Creating chat completion with model {model.name}, max_tokens {model_max_tokens}{Fore.RESET}"
     )
 
     chat_completion_kwargs = {"model": config.model_name,
@@ -163,8 +163,12 @@ def chat_with_agent(agent,
     )
 
     # Update full message history
-    print(message_sequence)
     agent.history.append(message_sequence.messages[-1])
-    agent.history.add("assistant", assistant_reply, assistant_reply.function_call)
+    if agent.role == "student":
+        print(f"{agent.role} -> {assistant_reply.function_call}")
+        agent.history.add("assistant", assistant_reply, assistant_reply.function_call)
+        return assistant_reply
 
+    print(f"{agent.role} -> {assistant_reply.content}")
+    agent.history.add("assistant", assistant_reply, assistant_reply.content)
     return assistant_reply
