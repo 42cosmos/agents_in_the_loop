@@ -3,9 +3,7 @@ import logging
 import argparse
 from functools import partial
 
-import os
 # import sys
-#
 # sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from transformers import (
@@ -13,39 +11,36 @@ from transformers import (
     AutoConfig,
     AutoModelForTokenClassification,
     AutoTokenizer,
-    BertTokenizerFast,
     Trainer,
     TrainingArguments,
 )
 
-from utils import (
-    setup_logging,
-    ModelArguments,
-    DataTrainingArguments,
-    Metrics,
-    read_yaml,
-    NerProcessor,
-    tokenize_and_align_labels,
-)
+from utils.utils import setup_logging
+
+from utils.trainer import tokenize_and_align_labels
+from utils.arguments import ModelArguments, DataTrainingArguments
+from utils.metric import Metrics
+
+from utils.data_loader import NerProcessor
+from utils.llm.agent import LANGUAGES
 
 from datasets import concatenate_datasets
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name", type=str, default="wikiann", choices=["wikiann", "polyglot"])
-    parser.add_argument("--dataset_lang", type=str, default="en", choices=["ko", "en", "ja", "pl", "id"])
-    parser.add_argument("--model_name", type=str, default="bert-base-multilingual-uncased")
-    parser.add_argument("--mix_dataset_mode", type=str, default="original",
-                        choices=["original", "random_entity", "random_word_and_entity", "random_entity_partial",
-                                 "unlabelled"])
+    parser.add_argument("--dataset_name", type=str, default="wikiann",
+                        choices=["wikiann", "polyglot", "mit_restaurant", "mit_movie", "bionlp2004"])
+    parser.add_argument("--dataset_lang", type=str, default="id", choices=["ko", "en", "ja", "pl", "id"])
+    parser.add_argument("--model_name", type=str, default="xlm-roberta-base")  # bert-base-multilingual-uncased
+    parser.add_argument("--mix_dataset_mode", type=str, default="original", choices=["original", "unlabelled"])
     parser.add_argument("--portion", type=float, default=1.0)
     args = parser.parse_args()
+
+    assert args.dataset_name in ["mit_restaurant", "mit_movie", "bionlp2004"] and args.dataset_lang == "en", "These datasets are only available in English"
 
     start_time = datetime.datetime.now()
 
     selected_dataset = args.dataset_name
-    if args.dataset_name == "polyglot":
-        selected_dataset = f"eunbincosmos/{selected_dataset}-{args.dataset_lang}"
 
     model_args = ModelArguments(model_name_or_path=args.model_name)
     data_args = DataTrainingArguments(dataset_name=selected_dataset,
@@ -54,9 +49,13 @@ if __name__ == "__main__":
                                       data_mode=args.mix_dataset_mode
                                       )
 
-    logging_file_name = f"{selected_dataset.replace('/', '_')}-{args.dataset_lang}_{args.mix_dataset_mode}_{args.portion}"
-    logging_file_name += f"-seq_leng_{data_args.max_seq_length}"
-    logging_file_name += f"-single"
+    logging_file_name = f"dataset_{args.dataset_name}-{args.dataset_lang}"
+    logging_file_name += f"-data_mode_{args.mix_dataset_mode}"
+    if args.mix_dataset_mode == "unlabelled":
+        logging_file_name += f"-portion_{args.portion}"
+    logging_file_name += f"-sequence_length_{data_args.max_seq_length}"
+    model_names_setting_for_log_name = args.model_name.replace('-', '_')
+    logging_file_name += f"-single_{model_names_setting_for_log_name}"
     setup_logging(file_name=logging_file_name)
 
     processor = NerProcessor(data_args)
@@ -77,7 +76,7 @@ if __name__ == "__main__":
 
     config = AutoConfig.from_pretrained(model_args.model_name_or_path, num_labels=len(label_list))
     model = AutoModelForTokenClassification.from_pretrained(model_args.model_name_or_path, config=config)
-    tokenizer = BertTokenizerFast.from_pretrained(model_args.model_name_or_path, use_fast=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, use_fast=True)  # BertTokenizerFast
 
     col_names = train_dataset.column_names
     encode_fn = partial(tokenize_and_align_labels,
@@ -139,7 +138,7 @@ if __name__ == "__main__":
         logging.info(f"  {key} = {value}")
 
     end_time = datetime.datetime.now()
-    logging.info(f"*****Final F1 score: {metrics['test_f1']}*****")
+    logging.info(f"*****{args.dataset_name}-{LANGUAGES[args.dataset_lang]} Final F1 score: {metrics['test_f1']}*****")
     logging.info(
         f"Starts at {start_time.strftime('%Y-%m-%d %H-%M-%S')} -> Ends at {end_time.strftime('%Y-%m-%d %H-%M-%S')}")
     logging.info(f" 소요 시간: {end_time - start_time}")
