@@ -22,7 +22,7 @@ from utils.llm.token_counter import count_message_tokens
 from utils.throttling import TokenThrottling
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.INFO)
 
 def create_chat_completion(
         agent,
@@ -163,6 +163,7 @@ def chat_with_agent(agent,
     )
 
     # Update full message history
+    print(message_sequence)
     agent.history.append(message_sequence.messages[-1])
     agent.history.add("assistant", assistant_reply, assistant_reply.function_call)
 
