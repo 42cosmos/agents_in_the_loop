@@ -50,7 +50,7 @@ def process_llm(random_data,
                 agent: Student,
                 db_client: RedisLLMResponse) -> List[ChatModelResponse]:
     logger = logging.getLogger(f"{process_llm.__name__}-{random_data['id']}")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     all_agents_answer = agent.talk_to_agent(raw_data=random_data,
                                             similar_examples=prompt_examples,
@@ -83,7 +83,7 @@ def add_new_features(example, model_trainers, db_client, base_dataset):
             import random
             random_number = random.randint(0, base_dataset.num_rows)
             basic_example = base_dataset.select([random_number])
-            similar_example = get_example(basic_example, id_to_label)
+            similar_example = get_example(basic_example, trainer.id_to_label)
 
         example_dict[example["id"]].append(similar_example[0])
     return example_dict
@@ -138,7 +138,7 @@ def get_llm_labeling(agent: Student,
                      num_threads=20
                      ):
     logger = logging.getLogger(f"{get_llm_labeling.__name__}")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     existed_llm_ids = find_exist_files_in_db(indices=uncertain_data_indices, db_client=db_client)
     indices_requiring_labelling = list(set(uncertain_data_indices) - set(existed_llm_ids))
@@ -401,17 +401,16 @@ if __name__ == "__main__":
                                                      label_to_id=label_to_id,
                                                      db_client=db_prompt_client)
 
-                # 기존 pool dataset 에서 llm 이 보정한 불확실한 데이터셋을 제거: pool update #1
+                # 기존 pool dataset 에서 llm 이 보정한 불확실한 데이터셋을 제거
                 pool_dataset = match_indices_from_base_dataset(base_dataset=pool_dataset,
-                                                               indices_to_find=new_label_dataset["id"])
+                                                               indices_to_find=new_label_dataset["id"] +
+                                                                               agreement_dataset["id"])
 
-                # 불확실 데이터의 라벨을 지우고 pool dataset 에 새로운 라벨을 업데이트: pool update #1
+                # pool dataset 에 새로운 라벨을 업데이트: pool update #1
                 pool_dataset = concatenate_datasets([pool_dataset, new_label_dataset, agreement_dataset])
-
             else:
                 # oracle에게 물어볼 데이터셋이 없다면 샘플 데이터셋이 곧 다음 학습 데이터셋
                 new_label_dataset = sample_pool_dataset
-        new_label_dataset = new_label_dataset.cast(initial_train_dataset.features)
 
         for model_name, trainer_dict in model_trainers.items():
             if trainer_dict["early_stopped"]:
