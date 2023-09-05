@@ -401,8 +401,8 @@ if __name__ == "__main__":
                                                      sample_pool_dataset=uncertain_sample_pool_dataset,
                                                      label_to_id=label_to_id,
                                                      db_client=db_prompt_client)
-
-                new_label_dataset = concatenate_datasets([new_label_dataset, agreement_dataset])
+                if agreement_dataset:
+                    new_label_dataset = concatenate_datasets([new_label_dataset, agreement_dataset])
 
                 # 기존 pool dataset 에서 llm 이 보정한 불확실한 데이터셋을 제거
                 pool_dataset = match_indices_from_base_dataset(base_dataset=pool_dataset,
