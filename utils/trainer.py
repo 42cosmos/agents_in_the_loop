@@ -117,20 +117,26 @@ def get_original_labels(tokens, predictions, label_positions, offset_mapping, id
     tokenized_tokens = tokenizer.tokenize(" ".join(tokens))
 
     # 인덱스를 레이블로 변환합니다.
-    predicted_labels = [id_to_label[pred] for label, pred in zip(label_positions, predicted_ids) if
-                        label != -100]
+    position_indices = np.where(label_positions != -100)[0].tolist()
+
+    slice_indices = slice(position_indices[0], position_indices[-1] + 1)
+    label_positions = label_positions[slice_indices]
+    offset_mapping = offset_mapping[slice_indices]
+    predicted_ids = predicted_ids[slice_indices]
+
+    predicted_labels = [id_to_label[pred] for label, pred in zip(label_positions, predicted_ids)]
 
     original_labels = []
-    label_positions = label_positions[1:len(tokenized_tokens) + 1]
-    offset_mapping = offset_mapping[1:len(tokenized_tokens) + 1]
-    special_tokens = tokenizer.all_special_tokens
-    label_idx = 0  # predicted_labels의 인덱스를 추적하기 위한 변수
-    for label, offset, token in zip(label_positions, offset_mapping, tokenized_tokens):
-        if (token not in special_tokens) and (
-                offset[0] == 0 and offset[1] != 0):
-            if label != -100:
-                original_labels.append(predicted_labels[label_idx])
-                label_idx += 1  # predicted_labels의 인덱스를 증가시킵니다.
+    subword_prefix = '▁' if "roberta" in tokenizer.name_or_path else "##"
+
+    for pred, label, offset, token in zip(predicted_labels, label_positions, offset_mapping, tokenized_tokens):
+        if offset[0] == 0 and offset[1] != 0:
+            if token == subword_prefix and "roberta" in tokenizer.name_or_path:
+                continue
+            if token.startswith(subword_prefix) and "bert-base" in tokenizer.name_or_path:
+                continue
+            else:
+                original_labels.append(pred)
     return original_labels
 
 
