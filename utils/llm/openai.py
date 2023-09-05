@@ -166,12 +166,15 @@ def retry_api(
 
                 except (APIError, Timeout) as e:
                     if (e.http_status not in [429, 502]) or (attempt == num_retries):
-                        raise
+                        return False
 
                     elif e.http_status == 443:
                         logger.error(f"{e} occurred. Waiting 2 minutes...")
                         time.sleep(120)
                         user_warned = True
+                        if attempt == num_retries:
+                            logger.error(f"{e} occurred. Max retries reached. Returning empty value.")
+                            return False
 
                 backoff = backoff_base ** (attempt + 2)
                 logger.debug(backoff_msg.format(backoff=backoff))
@@ -201,7 +204,7 @@ def create_chat_completion(
 
     """
     logger = logging.getLogger(f"{create_chat_completion.__name__}")
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
 
     completion = openai.ChatCompletion.create(
         messages=messages,
