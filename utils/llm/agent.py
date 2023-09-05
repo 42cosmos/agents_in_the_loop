@@ -81,7 +81,7 @@ class Agent:
         self.ner_guidance = self._get_basic_prompt()
 
         self.logger = logging.getLogger(f"{self.role}")
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG)
 
         assert dataset_lang in LANGUAGES, f"dataset_lang should be one of {LANGUAGES.keys()}"
 
@@ -204,7 +204,6 @@ class Student(Agent):
                       similar_examples=None,
                       get_feedback=False,
                       save_db=True):
-        assert (save_db and db_prompt_client is not None), "Please set db_client if you want to save the conversation"
         get_predicted_token_usage = count_expected_tokens(raw_data["tokens"])
 
         self.logger.info(f"Processing example: {raw_data['id']}")
@@ -228,8 +227,9 @@ class Student(Agent):
 
             answers.extend([teachers_feedback, final_answer])
         if save_db:
-            db_prompt_client.insert_conversation(answers)
-            self.logger.info(f"{raw_data['id']} stored in DB")
+            if db_prompt_client:
+                db_prompt_client.insert_conversation(answers)
+                self.logger.info(f"{raw_data['id']} stored in DB")
 
         return answers
 
@@ -239,10 +239,10 @@ class Student(Agent):
                         teacher_feedback,
                         function_call_examples,
                         throttling: TokenThrottling = None):
-        combined_prompt = f"""The Question Sentence is: {raw_data["tokens"]}
-Your initial answer is: {initial_answer}
+        combined_prompt = f"""Question Sentence: {raw_data["tokens"]}
+Your initial answer: {initial_answer}
 Peer Review: {teacher_feedback}
-Please write your final answer. But you don't have to follow the Review if you're confident with your original answer."""
+Please write your final answer."""
         final_reply = self.create_chat_with_agent(raw_question_data=raw_data,
                                                   user_sentence=combined_prompt,
                                                   function_call_examples=function_call_examples,
