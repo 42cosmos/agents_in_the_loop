@@ -168,6 +168,11 @@ def retry_api(
                     if (e.http_status not in [429, 502]) or (attempt == num_retries):
                         raise
 
+                    elif e.http_status == 443:
+                        logger.error(f"{e} occurred. Waiting 2 minutes...")
+                        time.sleep(120)
+                        user_warned = True
+
                 backoff = backoff_base ** (attempt + 2)
                 logger.debug(backoff_msg.format(backoff=backoff))
                 time.sleep(backoff)
