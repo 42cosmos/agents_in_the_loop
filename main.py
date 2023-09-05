@@ -172,8 +172,8 @@ def get_llm_labeling(agent: Student,
                                      propmt_examples=random_with_db_examples,
                                      random_pool_dataset=dataset_requiring_labelling,
                                      db_client=db_client)
-            # create_futures 함수에서 생성된 futures를 처리하고, 각 Future의 결과를 수집
-            thread_results = process_futures(futures, pbar)  # prompt db
+        # create_futures 함수에서 생성된 futures를 처리하고, 각 Future의 결과를 수집
+        thread_results = process_futures(futures, pbar)  # prompt db
 
         # with ThreadPoolExecutor 문이 종료되었기 때문에 ThreadPoolExecutor과는 별개로 코드가 실행되며
         # 병렬 처리가 필요하지 않은 코드
@@ -191,6 +191,7 @@ def get_llm_labeling(agent: Student,
             # 데이터 호출 후 원본 데이터셋 형식에 맞게 반환 ( id, tokens, ner_tags )
             db_answer = db_client.retrieve_memory(f"student:{data_id}:3", "answer")  # prompt db
             if db_answer != "null":
+                # DB에서 가져온 LLM 의 값을 label_to_id 형식으로 변환 -> 최종적으로 EntityAgentResponse 형식으로 변환
                 one_row_data, remove_data_id = answer_to_data(db_answer, label_to_id=label_to_id, data_id=data_id)
                 if one_row_data:
                     existed_llm_data.append(one_row_data.raw())
@@ -401,13 +402,14 @@ if __name__ == "__main__":
                                                      label_to_id=label_to_id,
                                                      db_client=db_prompt_client)
 
+                new_label_dataset = concatenate_datasets([new_label_dataset, agreement_dataset])
+
                 # 기존 pool dataset 에서 llm 이 보정한 불확실한 데이터셋을 제거
                 pool_dataset = match_indices_from_base_dataset(base_dataset=pool_dataset,
-                                                               indices_to_find=new_label_dataset["id"] +
-                                                                               agreement_dataset["id"])
+                                                               indices_to_find=new_label_dataset["id"])
 
                 # pool dataset 에 새로운 라벨을 업데이트: pool update #1
-                pool_dataset = concatenate_datasets([pool_dataset, new_label_dataset, agreement_dataset])
+                pool_dataset = concatenate_datasets([pool_dataset, new_label_dataset])
             else:
                 # oracle에게 물어볼 데이터셋이 없다면 샘플 데이터셋이 곧 다음 학습 데이터셋
                 new_label_dataset = sample_pool_dataset
