@@ -220,7 +220,7 @@ class Student(Agent):
                                                            throttling=self.throttling)
 
             final_answer = self._finalise_reply(raw_data=raw_data,
-                                                initial_answer=student_first_answer.ner_tags,
+                                                initial_answer=student_first_answer,
                                                 teacher_feedback=teachers_feedback.content,
                                                 function_call_examples=similar_examples,
                                                 throttling=self.throttling)
@@ -239,10 +239,14 @@ class Student(Agent):
                         teacher_feedback,
                         function_call_examples,
                         throttling: TokenThrottling = None):
-        combined_prompt = f"""Question Sentence: {raw_data["tokens"]}
-Your initial answer: {initial_answer}
-Peer Review: {teacher_feedback}
-Please write your final answer."""
+
+        combined_prompt = f"""Question Sentence: {raw_data["tokens"]}\nYour initial answer: """
+        if initial_answer is None or initial_answer.ner_tags is None:
+            combined_prompt += "Nothing"
+        else:
+            combined_prompt += f"{initial_answer.ner_tags}"
+
+        combined_prompt += f"""Peer Review: {teacher_feedback}\n\nPlease write your final answer."""
         final_reply = self.create_chat_with_agent(raw_question_data=raw_data,
                                                   user_sentence=combined_prompt,
                                                   function_call_examples=function_call_examples,
@@ -301,41 +305,49 @@ def make_example(example, id_to_label=None):
 def answer_to_data(answer, label_to_id=None, data_id=None):
     logger_name = f"{answer_to_data.__name__}"
     if data_id:
+        # data_id -> DB의 값을 가져오는 경우 값 존재
         logger_name += f"-{data_id}"
 
     logger = logging.getLogger(logger_name)
     fail_result = None, []
     retry_datum = fail_result[1]
 
-    json_response = {"response": [{"entity": "", "word": ""}]}
+    json_response = {"response": []}
     if data_id:
-        json_response = json.loads(answer)
+        try:
+            json_response = json.loads(answer)
+        except Exception as e:
+            logger.debug(f"Exception in {data_id}: {answer}")
+            logger.debug(f"Exception in {data_id}: {e}")
 
     else:
         data_id = answer.data_id
         if answer.function_call:
             json_response = json.loads(answer.function_call.arguments)
-    try:
-        response = json_response["response"]
+
+    response = json_response["response"]
+    if response:
         try:
             temp_entity = [i["entity"] for i in response]
             temp_word = [i["word"] for i in response]
+
         except KeyError as key_error:
             logger.error(f"KeyError in {data_id}: {key_error}")
             retry_datum.append(data_id)
             return fail_result
+
         except ValueError as value_error:
             logger.error(f"ValueError in {data_id}: {value_error}")
             retry_datum.append(data_id)
             return fail_result
+
         except TypeError as type_error:
             # LLM이 word와 entity 를 반대로 작성하는 경우가 종종 있음
             logger.error(f"TypeError in {data_id}: {type_error}")
             retry_datum.append(data_id)
             return fail_result
-
-    except KeyError as key_error:
-        logger.error(f"KeyError in {data_id}: {key_error}")
+    else:
+        retry_datum.append(data_id)
         return fail_result
 
     if label_to_id:
@@ -344,7 +356,13 @@ def answer_to_data(answer, label_to_id=None, data_id=None):
              entity_dict['word'])
             for entity_dict in response
         ])
-        return EntityAgentResponse(data_id=data_id, tokens=list(words), ner_tags=list(entities)), retry_datum
+        result = EntityAgentResponse(data_id=data_id, tokens=list(words), ner_tags=list(entities)), retry_datum
+    else:
+        entities, words = zip(*[(entity_dict['entity'], entity_dict['word']) for entity_dict in response])
+        result = EntityAgentResponse(data_id=data_id, tokens=list(words), ner_tags=list(entities)), retry_datum
 
-    entities, words = zip(*[(entity_dict['entity'], entity_dict['word']) for entity_dict in response])
-    return EntityAgentResponse(data_id=data_id, tokens=list(words), ner_tags=list(entities)), retry_datum
+    if result[0].tokens and result[0].ner_tags:
+        return result
+    else:
+        retry_datum.append(data_id)
+        return fail_result
