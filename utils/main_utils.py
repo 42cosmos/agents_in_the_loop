@@ -28,7 +28,7 @@ def uncertainty_sampling_multi_models(trainers: dict,
         if len(predicts["tokens"]) == len(predict_labels):
             certainty_datum.append({"id": key, "tokens": predicts["tokens"], "ner_tags": predict_labels})
 
-    certainty_dataset = Dataset.from_list(certainty_datum, features=dataset.features)
+    certainty_dataset = Dataset.from_list(certainty_datum)
 
     # DESCRIPTION: average_disagreement_rate: 평균적으로 첫 번째 모델의 예측에 비해 다른 모델들이 average_disagreement_rate% 불일치한다는 것
 
