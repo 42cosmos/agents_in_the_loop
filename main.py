@@ -38,9 +38,8 @@ from utils.trainer import (
     calculate_threshold,
     ModelTrainer)
 
-from utils.llm.agent import Student, answer_to_data, get_similar_dataset, get_example
-
 from utils.arguments import DataTrainingArguments
+from utils.llm.agent import Student, answer_to_data, get_similar_dataset, get_example
 
 import concurrent.futures
 
@@ -111,8 +110,9 @@ def process_futures(futures, pbar):
     for future in concurrent.futures.as_completed(futures):
         llm_responses = future.result()
         try:
-            future_results.append(llm_responses[-1])
-            pbar.update(1)
+            if llm_responses:
+                future_results.append(llm_responses[-1])
+                pbar.update(1)
 
         except Exception as e:
             handle_general_error(e, logger)
@@ -400,7 +400,7 @@ if __name__ == "__main__":
                 new_label_dataset = sample_pool_dataset
             new_label_dataset = agreement_dataset
         else:
-            # 확실한 데이터는 샘플풀에서 제거
+            # 샘플풀에서 불확실한 데이터셋 제거
             uncertain_sample_pool_dataset = match_indices_from_base_dataset(base_dataset=sample_pool_dataset,
                                                                             indices_to_find=uncertain_indices,
                                                                             remove=False)
