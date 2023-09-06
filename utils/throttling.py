@@ -68,6 +68,10 @@ class TokenThrottling(Throttling):
             elapsed = now - self.timestamp
             token_elapsed = now - self.token_last
 
+            # 토큰 추가
+            self.tokens += elapsed * self.rate
+            self.token_bucket += token_elapsed * self.token_rate
+
             if elapsed * self.rate > 1:
                 # 새 토큰 추가
                 self.tokens += elapsed * self.rate
@@ -84,7 +88,7 @@ class TokenThrottling(Throttling):
             # 토큰이 충분해질 때까지 대기
             while self.tokens < amount or self.token_bucket < tokens:
                 time.sleep(60)  # 60초 대기
-                self.logger.info(f"Waiting for tokens to be refilled...")
+                self.logger.info(f"Waiting for tokens to be refill...")
                 now = time.time()
                 elapsed = now - self.timestamp
                 token_elapsed = now - self.token_last
