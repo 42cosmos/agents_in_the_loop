@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from dataclasses import dataclass, field
 
 import openai
+from redis.exceptions import DataError
 
 from utils.llm.chat import chat_with_agent
 from utils.llm.base import (
@@ -21,12 +22,13 @@ from utils.llm.base import (
     MessageFunctionCall,
     EntityAgentResponse, ChatSequence
 )
-from utils.llm.openai import OPEN_AI_CHAT_MODELS
+from utils.llm.openai_utils import OPEN_AI_CHAT_MODELS
 
 from utils.llm.token_counter import count_message_tokens
 from utils.throttling import TokenThrottling
 
 logger = logging.getLogger(f"{__name__}")
+logger.setLevel(logging.DEBUG)
 
 LANGUAGES = {
     "en": "english",
@@ -170,7 +172,7 @@ class Teacher(Agent):
     def give_feedback(self, raw_data, student_reply, throttling: TokenThrottling = None):
         if student_reply is None or student_reply.tokens is None:
             self.logger.info(f"{raw_data['id']} has no answer")
-            prompt = f"""There is no answer given by the student.\n Question Sentence: {raw_data["tokens"]}"""
+            prompt = f"""There is no given answer. Please give some detailed instructions to solve this question to find the entity. \n Question Sentence: {raw_data["tokens"]}"""
 
         else:
             problem_sentence = student_reply.tokens
@@ -228,8 +230,12 @@ class Student(Agent):
             answers.extend([teachers_feedback, final_answer])
         if save_db:
             if db_prompt_client:
-                db_prompt_client.insert_conversation(answers)
-                self.logger.info(f"{raw_data['id']} stored in DB")
+                try:
+                    db_prompt_client.insert_conversation(answers)
+                    self.logger.info(f"{raw_data['id']} stored in DB")
+                except DataError as data_error:
+                    self.logger.error(f"{answers}\n\n{raw_data['id']} has an error in DB: {data_error}")
+                    return []
 
         return answers
 
@@ -317,8 +323,8 @@ def answer_to_data(answer, label_to_id=None, data_id=None):
         try:
             json_response = json.loads(answer)
         except Exception as e:
-            logger.debug(f"Exception in {data_id}: {answer}")
-            logger.debug(f"Exception in {data_id}: {e}")
+            logger.warning(f"Exception in {data_id}: {answer}")
+            logger.warning(f"Exception in {data_id}: {e}")
 
     else:
         data_id = answer.data_id
