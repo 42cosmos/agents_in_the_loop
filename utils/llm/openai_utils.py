@@ -1,17 +1,15 @@
-import ast
-import functools
 import time
 import logging
+import functools
 from typing import Optional, List
 from dataclasses import dataclass
 
 from colorama import Fore, Style
 
 from utils.llm.base import ChatModelInfo, MessageDict
-
-from openai.openai_object import OpenAIObject
-import openai.api_resources.abstract.engine_api_resource as engine_api_resource
 from openai.error import APIError, RateLimitError, ServiceUnavailableError, Timeout
+
+logging.basicConfig(level=logging.DEBUG)
 
 OPEN_AI_CHAT_MODELS = {
     info.name: info
@@ -89,7 +87,6 @@ class TokenMismatchError(Exception):
 
 def retry_api(
         num_retries: int = 5,
-        backoff_base: float = 2.0,
         warn_user: bool = True,
 ):
     """Retry an OpenAI API call.
@@ -99,10 +96,6 @@ def retry_api(
         backoff_base float: Base for exponential backoff. Defaults to 2.
         warn_user bool: Whether to warn the user. Defaults to True.
     """
-
-    logger = logging.getLogger(f"{retry_api.__name__}")
-    logger.setLevel(logging.DEBUG)
-
     from json.decoder import JSONDecodeError
     error_messages: dict = {
         ServiceUnavailableError: f"{Fore.RED}Error: The OpenAI API engine is currently overloaded, passing...{Fore.RESET}",
@@ -127,6 +120,7 @@ def retry_api(
     def _wrapper(func):
         @functools.wraps(func)
         def _wrapped(*args, **kwargs):
+            retry_logger = logging.getLogger(f"retry_api")
             user_warned = not warn_user
             for attempt in range(1, num_retries + 1):
                 try:
@@ -135,48 +129,47 @@ def retry_api(
                 except (JSONDecodeError, RateLimitError, ServiceUnavailableError, TokenMismatchError, KeyError) as e:
                     if attempt == num_retries:
                         if isinstance(e, (JSONDecodeError, TokenMismatchError, KeyError)):
-                            logger.error(f"Max retries reached. Returning empty value due to {type(e).__name__}.")
+                            retry_logger.error(f"Max retries reached. Returning empty value due to {type(e).__name__}.")
                             return False
                         else:
                             raise
 
                     error_msg = error_messages[type(e)]
-                    logger.debug(error_msg)
 
                     if isinstance(e, JSONDecodeError):
-                        logger.error(f"{json_decode_error_msg} - attempt {attempt} of {num_retries}")
+                        retry_logger.error(f"{json_decode_error_msg} - attempt {attempt} of {num_retries}")
                         user_warned = True
 
                     if isinstance(e, TokenMismatchError):
-                        logger.error(f"{error_msg} - attempt {attempt} of {num_retries}")
+                        retry_logger.error(f"{error_msg} - attempt {attempt} of {num_retries}")
                         user_warned = True
 
                     if isinstance(e, KeyError):
-                        logger.error(f"{error_msg} - attempt {attempt} of {num_retries}")
+                        retry_logger.error(f"{error_msg} - attempt {attempt} of {num_retries}")
                         user_warned = True
 
                     if isinstance(e, RateLimitError):
-                        logger.error(f"{error_msg} occurred. Waiting 60 seconds...")
+                        retry_logger.error(f"{error_msg} occurred. Waiting 60 seconds...")
                         time.sleep(10)
                         user_warned = True
 
                     if not user_warned and type(e) is not JSONDecodeError:
-                        logger.error(api_key_error_msg)
+                        retry_logger.error(api_key_error_msg)
                         user_warned = True
 
                 except (APIError, Timeout) as e:
                     if (e.http_status not in [429, 502]) or (attempt == num_retries):
+                        retry_logger.error(f"{e} occurred. Max retries reached. Returning empty value.")
                         return False
 
                     elif e.http_status == 443:
-                        logger.error(f"{e} occurred. Waiting 2 minutes...")
                         user_warned = True
                         if attempt == num_retries:
-                            logger.error(f"{e} occurred. Max retries reached. Returning empty value.")
+                            retry_logger.error(f"{e} occurred. Max retries reached. Returning empty value.")
                             return False
 
                 backoff = 60  # 1 minute
-                logger.debug(backoff_msg.format(backoff=backoff))
+                retry_logger.warning(backoff_msg.format(backoff=backoff))
                 time.sleep(backoff)
 
         return _wrapped
@@ -202,8 +195,8 @@ def create_chat_completion(
         OpenAIObject: The ChatCompletion response from OpenAI
 
     """
-    logger = logging.getLogger(f"{create_chat_completion.__name__}")
-    logger.setLevel(logging.DEBUG)
+
+    chat_logger = logging.getLogger(f"create_chat_completion")
 
     completion = openai.ChatCompletion.create(
         messages=messages,
@@ -218,7 +211,7 @@ def create_chat_completion(
             raise TokenMismatchError("Mismatch between question tokens and response tokens.")
 
     if not hasattr(completion, "error"):
-        logger.debug(f"Response: {completion}")
+        chat_logger.warning(f"Response: {completion}")
     return completion
 
 
