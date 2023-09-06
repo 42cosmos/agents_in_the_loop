@@ -110,7 +110,7 @@ class Agent:
             openai.organization = self.organisation_key
 
     def _get_basic_prompt(self):
-        information = self.db_client.get_value(f"prompt:{self.dataset_name}:{LANGUAGES[self.dataset_lang]}")
+        information = self.db_client.get_value(f"prompt:{self.dataset_name}")
         warning_sign = ""
         if self.role == "student":
             warning_sign = self.db_client.get_value(f"prompt:warning")
