@@ -108,7 +108,7 @@ class ChatSequence:
 
     @classmethod
     def for_model(cls, model_name: str, messages: list[Message] | ChatSequence = []):
-        from utils.llm.openai import OPEN_AI_CHAT_MODELS
+        from utils.llm.openai_utils import OPEN_AI_CHAT_MODELS
 
         if not model_name in OPEN_AI_CHAT_MODELS:
             raise ValueError(f"Unknown chat model '{model_name}'")
