@@ -460,8 +460,7 @@ if __name__ == "__main__":
         os.makedirs("outputs", exist_ok=True)
         for model_name, trainer_dict in model_trainers.items():
             trainer = trainer_dict["trainer"]
+            trainer_tokenizer = trainer.tokenizer
             trainer_dict["trainer"].save_model(os.path.join("outputs", logging_file_name))
-
-        first_tokenizer = model_trainers[list(model_trainers.keys())[0]].trainer.tokenizer
-        torch.save(first_tokenizer.train_dataset,
-                   os.path.join("outputs", logging_file_name, "train_dataset"))  # 학습 데이터 저장
+            torch.save(trainer.train_dataset,
+                       os.path.join("outputs", logging_file_name, f"{model_name}-train_dataset"))  # 학습 데이터 저장
