@@ -11,7 +11,7 @@ from utils.llm.base import (
     ChatModelResponse,
 )
 
-from utils.llm.openai import (
+from utils.llm.openai_utils import (
     OpenAIFunctionSpec,
     OPEN_AI_CHAT_MODELS,
     ner_gpt_function,
@@ -49,7 +49,7 @@ def create_chat_completion(
     if model_max_tokens - reserved_tokens <= 0:
         model_max_tokens += int(reserved_tokens / 2)
 
-    logger.debug(
+    logger.warning(
         f"{Fore.GREEN}Creating chat completion with model {model.name}, max_tokens {model_max_tokens}{Fore.RESET}"
     )
 
@@ -61,7 +61,7 @@ def create_chat_completion(
         chat_completion_kwargs["function_call"] = {"name": functions[0]["name"]}
 
         for function in functions:
-            logger.debug(f"Function dicts: {function['name']}")
+            logger.warning(f"Function dicts: {function['name']}")
 
     logger.info(f"{raw_question_data['id']} is being processed...")
     response = openai_chat_completion(
@@ -148,10 +148,10 @@ def chat_with_agent(agent,
 
     # Throttling 적용
     if throttling:
-        num_tokens_to_comsume = send_token_limit + expected_return_tokens
-        while not throttling.consume_with_tokens(tokens=num_tokens_to_comsume):
+        print(f"send_token_limit: {send_token_limit}")
+        while not throttling.consume_with_tokens(tokens=send_token_limit):
             time.sleep(1)
-            logger.info(f"{Fore.RED}Waiting for tokens to be refilled...{Fore.RESET}")
+            logger.info(f"{Fore.RED}Waiting for tokens to be refill...{Fore.RESET}")
 
     assistant_reply = create_chat_completion(
         agent=agent,
@@ -165,10 +165,10 @@ def chat_with_agent(agent,
     # Update full message history
     agent.history.append(message_sequence.messages[-1])
     if agent.role == "student":
-        print(f"{agent.role} -> {assistant_reply.function_call}")
+        print(f"{raw_question_data['id']}: {agent.role} -> {assistant_reply.function_call}")
         agent.history.add("assistant", assistant_reply, assistant_reply.function_call)
         return assistant_reply
 
-    print(f"{agent.role} -> {assistant_reply.content}")
+    print(f"{raw_question_data['id']}: {agent.role} -> {assistant_reply.content}")
     agent.history.add("assistant", assistant_reply, assistant_reply.content)
     return assistant_reply
