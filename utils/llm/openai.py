@@ -156,8 +156,8 @@ def retry_api(
                         user_warned = True
 
                     if isinstance(e, RateLimitError):
-                        logger.error(f"RateLimitError occurred. Waiting 60 seconds...")
-                        time.sleep(60)
+                        logger.error(f"{error_msg} occurred. Waiting 60 seconds...")
+                        time.sleep(10)
                         user_warned = True
 
                     if not user_warned and type(e) is not JSONDecodeError:
@@ -170,13 +170,12 @@ def retry_api(
 
                     elif e.http_status == 443:
                         logger.error(f"{e} occurred. Waiting 2 minutes...")
-                        time.sleep(120)
                         user_warned = True
                         if attempt == num_retries:
                             logger.error(f"{e} occurred. Max retries reached. Returning empty value.")
                             return False
 
-                backoff = backoff_base ** (attempt + 2)
+                backoff = 60  # 1 minute
                 logger.debug(backoff_msg.format(backoff=backoff))
                 time.sleep(backoff)
 
