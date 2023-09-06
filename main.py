@@ -222,7 +222,7 @@ def get_llm_labeling(agent: Student,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_name", type=str, default="wikiann", choices=["wikiann", "polyglot"])
-    parser.add_argument("--dataset_lang", type=str, default="en", choices=["ko", "en", "ja", "pl", "id"])
+    parser.add_argument("--dataset_lang", type=str, default="ja", choices=["ko", "en", "ja", "pl", "id"])
     parser.add_argument("--model_name", type=str,
                         default="bert-base-multilingual-uncased xlm-roberta-base")  # 기준 모델이 앞에
     parser.add_argument("--mix_dataset_mode", type=str, default="unlabelled", choices=["original", "unlabelled"])
@@ -252,6 +252,7 @@ if __name__ == "__main__":
     model_names_setting_for_log_name = args.model_name.replace('-', '_')
     model_names_setting_for_log_name = model_names_setting_for_log_name.replace(" ", "-")
     logging_file_name = f"models-{model_names_setting_for_log_name}"
+    logging_file_name += f"-dataset_{args.dataset_name}_{args.dataset_lang}"
     logging_file_name += f"-data_mode_{args.mix_dataset_mode}"
     if args.mix_dataset_mode == "unlabelled":
         logging_file_name += f"-portion_{args.portion}"
@@ -274,7 +275,7 @@ if __name__ == "__main__":
 
         check_unlabelled = list(chain(*pool_dataset["ner_tags"]))
         assert len(set(check_unlabelled)) == 1, f"Unlabelled dataset has more than one label: {set(check_unlabelled)}"
-        logging.info(f"All labels are removed from the dataset.")
+        logging.info(f"All labels are removed from the pool dataset.")
 
     # GPU 메모리 확인
     memory_info = check_gpu_memory()
@@ -369,9 +370,9 @@ if __name__ == "__main__":
             # 각 모델의 현재 점수 확인 및 while 루프의 조건 확인
             trainer_dict["current_score"] = current_score
 
-            logging.info(f"{Fore.BLUE}***** Evaluation metrics for {model_name} *****{Fore.RESET}")
+            logging.info(f"{Fore.GREEN}***** Evaluation metrics for {model_name} *****{Fore.RESET}")
             for k, v in eval_result.items():
-                logging.info(f"{Fore.BLUE}  {k} = {v}{Fore.RESET}")
+                logging.info(f"{Fore.GREEN}  {k} = {v}{Fore.RESET}")
             logging.info(
                 f"Current F1 for {Fore.CYAN}{model_name}: {eval_result['eval_f1']}{Fore.RESET} // Training count: {trainer_dict['training_count']}")
 
@@ -387,8 +388,9 @@ if __name__ == "__main__":
                                               id_to_label=id_to_label,
                                               training_threshold=current_threshold)
 
-        logging.info(f"Current Threshold: {current_threshold}")
-        logging.info(f"Number of Incomplete Data: {len(uncertain_indices)}")
+        logging.info(f"{Fore.LIGHTMAGENTA_EX}Current Threshold: {current_threshold}{Fore.RESET}")
+        logging.info(f"{Fore.LIGHTMAGENTA_EX}Number of Incomplete Data: {len(uncertain_indices)}{Fore.RESET}")
+        logging.info(f"{Fore.LIGHTMAGENTA_EX}Number of Agreement Data: {agreement_dataset.num_rows}{Fore.RESET}")
         logging.info(f"Percentage of disagreement between models for each prediction: {disagreement_rate}")
 
         if not uncertain_indices:
@@ -411,6 +413,7 @@ if __name__ == "__main__":
                                                      sample_pool_dataset=uncertain_sample_pool_dataset,
                                                      label_to_id=label_to_id,
                                                      db_client=db_prompt_client)
+
                 if agreement_dataset:
                     new_label_dataset = concatenate_datasets([new_label_dataset, agreement_dataset])
 
@@ -428,6 +431,7 @@ if __name__ == "__main__":
             if trainer_dict["early_stopped"]:
                 # 모델이 이미 학습을 멈추었다면 다음 학습을 위한 데이터셋 업데이트는 필요없음
                 continue
+
             updated_trainer = trainer_dict["trainer"]
             updated_trainer.update_dataset(new_label_dataset)
             logging.info(
