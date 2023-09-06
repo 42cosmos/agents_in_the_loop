@@ -225,7 +225,6 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_lang", type=str, default="en", choices=["ko", "en", "ja", "pl", "id"])
     parser.add_argument("--model_name", type=str,
                         default="bert-base-multilingual-uncased xlm-roberta-base")  # 기준 모델이 앞에
-    # wikiann en : bert 0.8598, xlm 0.8568
     parser.add_argument("--mix_dataset_mode", type=str, default="unlabelled", choices=["original", "unlabelled"])
     parser.add_argument("--portion", type=float, default=1.0)
     parser.add_argument("--ask_oracle", action="store_false")
@@ -306,6 +305,15 @@ if __name__ == "__main__":
     db_prompt_client = RedisLLMResponse()
     db_vector_client = RedisVector(dataset_title_value=args.dataset_name,
                                    dataset_lang_value=args.dataset_lang)
+
+    # 기존 저장된 임베딩값이 최초 정답 데이터셋 * 모델의 수 보다 많다면 모든 데이터를 삭제
+    saved_embedding_keys = db_vector_client.get_all_key_by_pattern(f"dataset*{args.dataset_name}:{args.dataset_name}*")
+    expected_saved_embeddings = initial_train_dataset.num_rows * len(model_trainers)
+    if len(saved_embedding_keys) > expected_saved_embeddings:
+        for key in saved_embedding_keys:
+            db_vector_client.delete_key(key)
+        logging.info(f"{Fore.YELLOW}Deleted {len(saved_embedding_keys)} keys{Fore.RESET}")
+
     with open("config.yaml") as f:
         agent_config = EasyDict(yaml.safe_load(f))
 
