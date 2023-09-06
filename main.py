@@ -392,9 +392,11 @@ if __name__ == "__main__":
         logging.info(f"Percentage of disagreement between models for each prediction: {disagreement_rate}")
 
         if not uncertain_indices:
-            # 불확실한 데이터가 없다고 판단한 경우, 추출된 sample 모두는 그대로 다음 학습 대상이 됨
-            logging.info(f"No uncertain indices found.")
-            new_label_dataset = sample_pool_dataset
+            if not agreement_dataset.num_rows:
+                # 불확실한 데이터가 없다고 판단한 경우, 추출된 sample 모두는 그대로 다음 학습 대상이 됨
+                logging.info(f"No uncertain indices and agreement data found.")
+                new_label_dataset = sample_pool_dataset
+            new_label_dataset = agreement_dataset
         else:
             # 확실한 데이터는 샘플풀에서 제거
             uncertain_sample_pool_dataset = match_indices_from_base_dataset(base_dataset=sample_pool_dataset,
