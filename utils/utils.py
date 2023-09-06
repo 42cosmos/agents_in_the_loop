@@ -19,7 +19,6 @@ from easydict import EasyDict
 
 def setup_logging(file_name=None):
     main_script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    proj_dir = os.path.abspath(os.path.join(main_script_dir, ".."))
     logs_dir = os.path.join(main_script_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
 
@@ -40,13 +39,13 @@ def setup_logging(file_name=None):
             config["handlers"]["file"].update({"filename": log_file})
             logging.config.dictConfig(config)
     else:
-        logging.info("Warning: logging_config.json not found. Using default logging configuration.")
+        logging.warning("logging_config.json not found. Using default logging configuration.")
         logging.basicConfig(
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
             datefmt="%Y/%m/%d %H:%M:%S",
             level=logging.DEBUG,
             handlers=[
-                logging.FileHandler(log_file),
+                logging.FileHandler(log_file, encoding='utf-8'),
                 logging.StreamHandler()
             ]
         )
