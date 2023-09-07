@@ -40,7 +40,7 @@ class ModelArguments:
         metadata={"help": "Where do you want to store the pretrained models downloaded from huggingface.co"},
     )
     output_dir: Optional[str] = field(
-        default="./outputs",
+        default="/home/eunbinpark/workspace/agents_in_the_loop/outputs",
         metadata={"help": "Where do you want to store the your models checkpoint"},
     )
     logging_dir: Optional[str] = field(
