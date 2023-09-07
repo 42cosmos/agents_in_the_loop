@@ -140,7 +140,8 @@ class Agent:
         if examples is None:
             return message_sequence
 
-        message_sequence.append(examples)
+        for example in examples:
+            message_sequence.append(example)
         return message_sequence
 
     def create_chat_with_agent(self,
