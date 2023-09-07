@@ -210,14 +210,14 @@ class Student(Agent):
         get_predicted_token_usage = count_expected_tokens(raw_data["tokens"])
 
         self.logger.info(f"Processing example: {raw_data['id']}")
-        answers = [self.create_chat_with_agent(user_sentence=str(raw_data["tokens"]),
-                                               raw_question_data=raw_data,
-                                               function_call_examples=similar_examples,
-                                               expected_return_tokens=get_predicted_token_usage,
-                                               throttling=self.throttling)]  # student 1
+        answers = {"1": self.create_chat_with_agent(user_sentence=str(raw_data["tokens"]),
+                                                    raw_question_data=raw_data,
+                                                    function_call_examples=similar_examples,
+                                                    expected_return_tokens=get_predicted_token_usage,
+                                                    throttling=self.throttling)}  # student 1
 
         if get_feedback:
-            student_first_answer, _ = answer_to_data(answers[0])
+            student_first_answer, _ = answer_to_data(answers["1"])
             teachers_feedback = self.teacher.give_feedback(raw_data=raw_data,
                                                            student_reply=student_first_answer,
                                                            throttling=self.throttling)
@@ -228,7 +228,9 @@ class Student(Agent):
                                                 function_call_examples=similar_examples,
                                                 throttling=self.throttling)
 
-            answers.extend([teachers_feedback, final_answer])
+            answers["2"] = teachers_feedback
+            answers["3"] = final_answer
+
         if save_db:
             if db_prompt_client:
                 try:
