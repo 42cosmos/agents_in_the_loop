@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from typing import List
+from typing import List, Dict
 
 import redis
 from colorama import Fore
@@ -268,7 +268,7 @@ class RedisLLMResponse(RedisClient):
             self.redis_conn.hset(prompt_key, mapping=document)
             self.logger.info(f"Prompt {prompt_key} added !")
 
-    def insert_conversation(self, prompt_datum: List[ChatModelResponse], doc_prefix="memory"):
+    def insert_conversation(self, prompt_datum: Dict[str, ChatModelResponse], doc_prefix="memory"):
         """
         :param prompt_datum: Model Responses in List
         :param doc_prefix: memory or prompt
@@ -276,16 +276,14 @@ class RedisLLMResponse(RedisClient):
         try:
             pipeline = self.redis_conn.pipeline()
 
-            for idx, data in enumerate(prompt_datum, 1):
-                agent_role = data.role
-                response_index = idx % 3 or 3
-                data_key = f"{agent_role}:{data.data_id}:{response_index}"
+            for idx, dict_data in enumerate(prompt_datum.items(), 1):
+                key, data = dict_data
+                if not data:
+                    self.logger.info(f"No data in {key}!")
+                    continue
 
-                # 조건 검사
-                if agent_role == "student":
-                    assert response_index in [1, 3], f"Invalid response_index {response_index} for student"
-                elif agent_role == "teacher":
-                    assert response_index == 2, f"Invalid response_index {response_index} for teacher"
+                agent_role = data.role
+                data_key = f"{agent_role}:{data.data_id}:{key}"
 
                 llm_answer = "null"
 
