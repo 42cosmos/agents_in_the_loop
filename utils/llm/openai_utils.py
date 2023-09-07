@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from colorama import Fore, Style
 
 from utils.llm.base import ChatModelInfo, MessageDict
-from openai.error import APIError, RateLimitError, ServiceUnavailableError, Timeout
+from openai.error import APIError, RateLimitError, ServiceUnavailableError, Timeout, InvalidRequestError
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -103,6 +103,7 @@ def retry_api(
         JSONDecodeError: f"{Fore.RED}Error: Failed to decode JSON response, passing...{Fore.RESET}",
         TokenMismatchError: f"{Fore.RED}Error: Mismatch between question tokens and response tokens, passing...{Fore.RESET}",
         KeyError: f"{Fore.RED}Error: Key error, passing...{Fore.RESET}",
+        InvalidRequestError: f"{Fore.RED}Error: Invalid request, passing...{Fore.RESET}",
     }
 
     json_decode_error_msg = (
@@ -126,36 +127,28 @@ def retry_api(
                 try:
                     return func(*args, **kwargs)
 
-                except (JSONDecodeError, RateLimitError, ServiceUnavailableError, TokenMismatchError, KeyError) as e:
-                    if attempt == num_retries:
-                        if isinstance(e, (JSONDecodeError, TokenMismatchError, KeyError)):
-                            retry_logger.error(f"Max retries reached. Returning empty value due to {type(e).__name__}.")
-                            return False
-                        else:
-                            raise
-
+                except (InvalidRequestError, RateLimitError, ServiceUnavailableError,  # openai error
+                        TokenMismatchError, KeyError, JSONDecodeError) as e:  # response error
                     error_msg = error_messages[type(e)]
+                    retry_logger.error(f"{error_msg} - attempt {attempt} of {num_retries}")
 
-                    if isinstance(e, JSONDecodeError):
-                        retry_logger.error(f"{json_decode_error_msg} - attempt {attempt} of {num_retries}")
-                        user_warned = True
-
-                    if isinstance(e, TokenMismatchError):
-                        retry_logger.error(f"{error_msg} - attempt {attempt} of {num_retries}")
-                        user_warned = True
-
-                    if isinstance(e, KeyError):
-                        retry_logger.error(f"{error_msg} - attempt {attempt} of {num_retries}")
-                        user_warned = True
+                    if attempt == num_retries:
+                        retry_logger.error(f"Max retries reached. Returning empty value due to {type(e).__name__}.")
+                        return False
 
                     if isinstance(e, RateLimitError):
                         retry_logger.error(f"{error_msg} occurred. Waiting 60 seconds...")
-                        time.sleep(10)
-                        user_warned = True
+                        time.sleep(30)
 
-                    if not user_warned and type(e) is not JSONDecodeError:
-                        retry_logger.error(api_key_error_msg)
-                        user_warned = True
+                    if isinstance(e, InvalidRequestError):
+                        retry_logger.error(f"{error_msg} occurred. Skip all retries and return empty value.")
+                        return False
+
+                    if not user_warned:
+                        if not isinstance(e, (TokenMismatchError, KeyError, JSONDecodeError)):
+                            retry_logger.debug(f"Status: {e.http_status}")
+                            retry_logger.debug(f"Response Body: {e.json_body}")
+                            retry_logger.debug(f"Response Headers: {e.headers}")
 
                 except (APIError, Timeout) as e:
                     if (e.http_status not in [429, 502]) or (attempt == num_retries):
