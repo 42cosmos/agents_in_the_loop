@@ -203,7 +203,7 @@ def create_chat_completion(
         if len(question_tokens) != len(check_json_decode_error["response"]):
             raise TokenMismatchError("Mismatch between question tokens and response tokens.")
 
-    if not hasattr(completion, "error"):
+    if hasattr(completion, "error"):
         chat_logger.warning(f"Response: {completion}")
     return completion
 
