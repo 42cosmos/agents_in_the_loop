@@ -3,6 +3,7 @@ import logging
 import argparse
 from functools import partial
 
+from colorama import Fore
 # import sys
 # sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -26,17 +27,29 @@ from utils.llm.agent import LANGUAGES
 
 from datasets import concatenate_datasets
 
+
+def validate_dataset_language(args):
+    error_msg = "This dataset is only available in {{language}}"
+    if args.dataset_name == "docent":
+        if args.dataset_lang != "ko":
+            raise ValueError(error_msg.format(language=LANGUAGES[args.dataset_lang]))
+    elif args.dataset_name in ["mit_restaurant", "mit_movie_trivia", "bionlp2004"]:
+        if args.dataset_lang != "en":
+            raise ValueError(error_msg.format(language=LANGUAGES[args.dataset_lang]))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name", type=str, default="wikiann",
-                        choices=["wikiann", "polyglot", "mit_restaurant", "mit_movie", "bionlp2004"])
-    parser.add_argument("--dataset_lang", type=str, default="id", choices=["ko", "en", "ja", "pl", "id"])
+    parser.add_argument("--dataset_name", type=str, default="docent",
+                        choices=["wikiann", "polyglot", "mit_restaurant", "mit_movie_trivia", "bionlp2004", "docent"])
+    parser.add_argument("--dataset_lang", type=str, default="ko", choices=["ko", "en", "ja", "pl", "id"])
     parser.add_argument("--model_name", type=str, default="xlm-roberta-base")  # bert-base-multilingual-uncased
     parser.add_argument("--mix_dataset_mode", type=str, default="original", choices=["original", "unlabelled"])
     parser.add_argument("--portion", type=float, default=1.0)
     args = parser.parse_args()
 
-    assert args.dataset_name in ["mit_restaurant", "mit_movie", "bionlp2004"] and args.dataset_lang == "en", "These datasets are only available in English"
+    # 도메인 데이터셋과 데이터셋 언어 설정이 맞는지 확인
+    validate_dataset_language(args)
 
     start_time = datetime.datetime.now()
 
@@ -138,7 +151,8 @@ if __name__ == "__main__":
         logging.info(f"  {key} = {value}")
 
     end_time = datetime.datetime.now()
-    logging.info(f"*****{args.dataset_name}-{LANGUAGES[args.dataset_lang]} Final F1 score: {metrics['test_f1']}*****")
+    logging.info(
+        f"{Fore.LIGHTMAGENTA_EX}***** {args.model_name} {args.dataset_name}-{LANGUAGES[args.dataset_lang]} Final F1 score: {metrics['test_f1']}*****{Fore.RESET}")
     logging.info(
         f"Starts at {start_time.strftime('%Y-%m-%d %H-%M-%S')} -> Ends at {end_time.strftime('%Y-%m-%d %H-%M-%S')}")
     logging.info(f" 소요 시간: {end_time - start_time}")
