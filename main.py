@@ -19,6 +19,8 @@ import numpy as np
 import torch
 from datasets import concatenate_datasets, Dataset
 
+from single_model import validate_dataset_language
+
 from utils.llm.base import ChatModelResponse, MessageFunctionCall
 from utils.utils import (
     check_gpu_memory,
@@ -111,12 +113,12 @@ def process_futures(futures, pbar):
         llm_responses = future.result()
         try:
             if llm_responses:
-                future_results.append(llm_responses[-1])
+                future_results.append(llm_responses["3"])
                 pbar.update(1)
 
         except Exception as e:
             handle_general_error(e, logger)
-            logger.error(f"Failed to process future with exception: {llm_responses[-1]}")
+            logger.error(f"Failed to process future with exception: {llm_responses['3']}")
     return future_results
 
 
@@ -221,10 +223,10 @@ def get_llm_labeling(agent: Student,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name", type=str, default="wikiann", choices=["wikiann", "polyglot"])
-    parser.add_argument("--dataset_lang", type=str, default="ja", choices=["ko", "en", "ja", "pl", "id"])
-    parser.add_argument("--model_name", type=str,
-                        default="bert-base-multilingual-uncased xlm-roberta-base")  # 기준 모델이 앞에
+    parser.add_argument("--dataset_name", type=str, default="mit_restaurant",
+                        choices=["mit_restaurant", "mit_movie_trivia", "bionlp2004", "wikiann", "polyglot", "docent"])
+    parser.add_argument("--dataset_lang", type=str, default="en", choices=["ko", "en", "ja", "pl", "id"])
+    parser.add_argument("--model_name", type=str, default="bert-base-multilingual-uncased xlm-roberta-base")
     parser.add_argument("--mix_dataset_mode", type=str, default="unlabelled", choices=["original", "unlabelled"])
     parser.add_argument("--portion", type=float, default=1.0)
     parser.add_argument("--ask_oracle", action="store_false")
@@ -236,7 +238,7 @@ if __name__ == "__main__":
     # pycharm 실행 시 store_true -> False
 
     args = parser.parse_args()
-
+    validate_dataset_language(args)
     if args.ask_oracle and args.mix_dataset_mode == "original":
         print("Original dataset does not need LLM. So LLM is not executed.")
         args.ask_oracle = False
@@ -390,7 +392,9 @@ if __name__ == "__main__":
 
         logging.info(f"{Fore.LIGHTMAGENTA_EX}Current Threshold: {current_threshold}{Fore.RESET}")
         logging.info(f"{Fore.LIGHTMAGENTA_EX}Number of Incomplete Data: {len(uncertain_indices)}{Fore.RESET}")
-        logging.info(f"{Fore.LIGHTMAGENTA_EX}Number of Agreement Data: {agreement_dataset.num_rows}{Fore.RESET}")
+        agreement_dataset_msg = f"{Fore.LIGHTMAGENTA_EX}Number of Agreement Data: {{num_rows}}{Fore.RESET}"
+        number_of_agreement_data = 0 if not agreement_dataset else agreement_dataset.num_rows
+        logging.info(agreement_dataset_msg.format(num_rows=number_of_agreement_data))
         logging.info(f"Percentage of disagreement between models for each prediction: {disagreement_rate}")
 
         if not uncertain_indices:
@@ -413,6 +417,8 @@ if __name__ == "__main__":
                                                      sample_pool_dataset=uncertain_sample_pool_dataset,
                                                      label_to_id=label_to_id,
                                                      db_client=db_prompt_client)
+
+                logging.info(f"Agent has labelled {new_label_dataset.num_rows} data.")
 
                 if agreement_dataset:
                     new_label_dataset = concatenate_datasets([new_label_dataset, agreement_dataset])
@@ -465,6 +471,7 @@ if __name__ == "__main__":
         for model_name, trainer_dict in model_trainers.items():
             trainer = trainer_dict["trainer"]
             trainer_tokenizer = trainer.tokenizer
-            trainer_dict["trainer"].save_model(os.path.join("outputs", logging_file_name))
+            trainer_dict["trainer"].save_model(os.path.join(trainer.model_args.output_dir, logging_file_name))
             torch.save(trainer.train_dataset,
-                       os.path.join("outputs", logging_file_name, f"{model_name}-train_dataset"))  # 학습 데이터 저장
+                       os.path.join(trainer.model_args.output_dir, logging_file_name,
+                                    f"{model_name}-train_dataset"))  # 학습 데이터 저장
