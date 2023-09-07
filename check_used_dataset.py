@@ -1,0 +1,84 @@
+import argparse
+import os
+
+import torch
+from colorama import Fore
+
+from main import validate_dataset_language
+from utils.arguments import DataTrainingArguments, ModelArguments
+from utils.database.redis_client import RedisLLMResponse
+from utils.llm.agent import LANGUAGES
+from utils.main_utils import match_indices_from_base_dataset
+
+
+def load_cached_dataset(data_path, return_model_information=False):
+    result = torch.load(data_path)
+    if return_model_information:
+        model_info = data_path.split("/")[-1].split("-")[0]
+        return model_info, result
+    return result
+
+
+def load_initial_dataset(path, dataset, language):
+    filename = f"cached-{dataset}-{language}_unlabelled-seq_len_128-10%"
+    result = torch.load(os.path.join(path, filename))
+    return result[0]
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset_name", type=str, default="wikiann",
+                        choices=["mit_restaurant", "mit_movie_trivia", "bionlp2004", "wikiann", "polyglot"])
+    parser.add_argument("--dataset_lang", type=str, default="id", choices=["ko", "en", "ja", "pl", "id"])
+    parser.add_argument("--model_name", type=str, default="bert-base-multilingual-uncased xlm-roberta-base")
+    parser.add_argument("--output_path", type=str, default="/home/eunbinpark/workspace/_agents_in_the_loop/outputs")
+
+    args = parser.parse_args()
+    validate_dataset_language(args)
+
+    data_args = DataTrainingArguments(dataset_name=args.dataset_name,
+                                      dataset_lang=args.dataset_lang,
+                                      portion=1.0,
+                                      data_mode="unlabelled"
+                                      )
+
+    model_output_path = args.output_path if args.output_path else ModelArguments.output_dir
+
+    model_names_setting_for_log_name = args.model_name.replace('-', '_')
+    model_names_setting_for_log_name = model_names_setting_for_log_name.replace(" ", "-")
+    dir_name = f"models-{model_names_setting_for_log_name}"
+    dir_name += f"-dataset_{args.dataset_name}_{args.dataset_lang}"
+    dir_name += f"-data_mode_unlabelled"
+    dir_name += f"-portion_1.0"
+    dir_name += f"-samples_{data_args.n_samples}"
+    dir_name += f"-sequence_length_{data_args.max_seq_length}"
+    dir_name += f"-ask_oracle_True"
+
+    print(dir_name)
+    redis = RedisLLMResponse()
+    initial_train_dataset = load_initial_dataset(data_args.data_dir, args.dataset_name, args.dataset_lang)
+    dataset_names = [f"{model.split('-')[0]}-train_dataset" for model in args.model_name.split(" ")]
+    output_data_pathes = [os.path.join(model_output_path, dir_name, model) for model in dataset_names]
+    used_datasets_by_name = [load_cached_dataset(output_data_path, return_model_information=True) for output_data_path
+                             in output_data_pathes]
+
+    print(f"{Fore.GREEN}***** {args.dataset_name} with {LANGUAGES[args.dataset_lang]} ***** ")
+    print(f"Initial train dataset: {initial_train_dataset.num_rows}{Fore.RESET}")
+    for idx, used_dataset in enumerate(zip(args.model_name.split(" "), used_datasets_by_name)):
+        model_full_name = used_dataset[0]
+        model_short_name, dataset = used_dataset[1]
+        extracted_from_initial_dataset = match_indices_from_base_dataset(dataset,
+                                                                         initial_train_dataset["id"])
+
+        if model_full_name.startswith(model_short_name):
+            colour = Fore.YELLOW if idx % 2 == 0 else Fore.CYAN
+            print(
+                f"{colour}{model_full_name} -> {extracted_from_initial_dataset.num_rows} datum used in train!")
+
+        in_db = []
+        find_key = f"memory*{{dataset_id}}:3"
+        for dataset_id in extracted_from_initial_dataset["id"]:
+            find_db_key = find_key.format(dataset_id=dataset_id)
+            in_db.extend(redis.get_all_key_by_pattern(find_db_key))
+
+        print(f"{model_full_name} -> {len(in_db)} LLM Responses in Database ! {Fore.RESET}")
