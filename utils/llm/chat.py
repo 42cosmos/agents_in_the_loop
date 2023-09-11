@@ -49,7 +49,7 @@ def create_chat_completion(
     if model_max_tokens - reserved_tokens <= 0:
         model_max_tokens += int(reserved_tokens / 2)
 
-    logger.warning(
+    logger.debug(
         f"{Fore.GREEN}Creating chat completion with model {model.name}, max_tokens {model_max_tokens}{Fore.RESET}"
     )
 
@@ -61,7 +61,7 @@ def create_chat_completion(
         chat_completion_kwargs["function_call"] = {"name": functions[0]["name"]}
 
         for function in functions:
-            logger.warning(f"Function dicts: {function['name']}")
+            logger.debug(f"Function dicts: {function['name']}")
 
     logger.info(f"{raw_question_data['id']} is being processed...")
     response = openai_chat_completion(
@@ -151,7 +151,7 @@ def chat_with_agent(agent,
         print(f"send_token_limit: {send_token_limit}")
         while not throttling.consume_with_tokens(tokens=send_token_limit):
             time.sleep(1)
-            logger.info(f"{Fore.RED}Waiting for tokens to be refill...{Fore.RESET}")
+            logger.debug(f"{Fore.RED}Waiting for tokens to be refill...{Fore.RESET}")
 
     assistant_reply = create_chat_completion(
         agent=agent,
