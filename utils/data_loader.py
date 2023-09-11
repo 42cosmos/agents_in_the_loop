@@ -56,7 +56,23 @@ class NerProcessor:
         self.start_tag = min(key for key in self.id_to_label if key != self.ignore_entity)
         self.end_tag = max(key for key in self.id_to_label if key != self.ignore_entity)
 
-    def get_dataset(self):
+    def get_dataset_with_train_dataset_in_arch(self, train_dataset_path):
+        self.logger.info(f"Loading Used Train Dataset from cached file {self.cached_file_name}")
+        loaded_data = torch.load(self.cached_features_file)
+        _, _, self.valid_dataset, self.test_dataset = loaded_data
+        self.update_label_list()
+
+        from check_used_dataset import load_cached_dataset
+        self.train_dataset = load_cached_dataset(train_dataset_path)
+        remove_col_names = list(set(self.train_dataset.column_names) - {'id', 'tokens', 'ner_tags'})
+        self.train_dataset = self.train_dataset.remove_columns(remove_col_names)
+
+        return self.train_dataset, self.valid_dataset, self.test_dataset
+
+    def get_dataset(self, train_dataset_path=None):
+        if train_dataset_path:
+            return self.get_dataset_with_train_dataset_in_arch(train_dataset_path)
+
         cached_file = self.get_cached_dataset()
         if cached_file:
             return cached_file
