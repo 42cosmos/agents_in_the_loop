@@ -6,10 +6,19 @@ from dataclasses import dataclass
 
 from colorama import Fore, Style
 
-from utils.llm.base import ChatModelInfo, MessageDict
+from utils.llm.base import ChatModelInfo, MessageDict, EntityAgentResponse
 from openai.error import APIError, RateLimitError, ServiceUnavailableError, Timeout, InvalidRequestError
 
 logging.basicConfig(level=logging.DEBUG)
+
+
+def convert_openai_answer_when_token_mismatch(answer, data_id):
+    import json
+    json_response = json.loads(answer.function_call.arguments)
+    response = json_response["response"]
+    entities, words = zip(*[(entity_dict['entity'], entity_dict['word']) for entity_dict in response])
+    return EntityAgentResponse(data_id=data_id, tokens=list(words), ner_tags=list(entities))
+
 
 OPEN_AI_CHAT_MODELS = {
     info.name: info
@@ -82,7 +91,10 @@ class OpenAIFunctionSpec:
 
 class TokenMismatchError(Exception):
     """Raised when there's a mismatch between token length."""
-    pass
+
+    def __init__(self, data_id, completion):
+        self.data_id = data_id
+        self.completion = completion
 
 
 def retry_api(
@@ -99,16 +111,12 @@ def retry_api(
     from json.decoder import JSONDecodeError
     error_messages: dict = {
         ServiceUnavailableError: f"{Fore.RED}Error: The OpenAI API engine is currently overloaded, passing...{Fore.RESET}",
-        RateLimitError: f"{Fore.RED}Error: Reached rate limit, passing...{Fore.RESET}",
+        RateLimitError: f"{Fore.RED}Error: Reached rate limit, Waiting 60 seconds...{Fore.RESET}",
         JSONDecodeError: f"{Fore.RED}Error: Failed to decode JSON response, passing...{Fore.RESET}",
         TokenMismatchError: f"{Fore.RED}Error: Mismatch between question tokens and response tokens, passing...{Fore.RESET}",
         KeyError: f"{Fore.RED}Error: Key error, passing...{Fore.RESET}",
-        InvalidRequestError: f"{Fore.RED}Error: Invalid request, passing...{Fore.RESET}",
+        InvalidRequestError: f"{Fore.RED}Error: Invalid request, Skip all retries and return empty value...{Fore.RESET}",
     }
-
-    json_decode_error_msg = (
-        f"{Fore.RED}Error: Failed to decode JSON response. {Fore.RESET}"
-    )
 
     api_key_error_msg = (
         f"Please double check that you have setup a "
@@ -123,6 +131,7 @@ def retry_api(
         def _wrapped(*args, **kwargs):
             retry_logger = logging.getLogger(f"retry_api")
             user_warned = not warn_user
+            backoff = 30
             for attempt in range(1, num_retries + 1):
                 try:
                     return func(*args, **kwargs)
@@ -134,15 +143,22 @@ def retry_api(
 
                     if attempt == num_retries:
                         retry_logger.error(f"Max retries reached. Returning empty value due to {type(e).__name__}.")
+                        if isinstance(e, TokenMismatchError):
+                            return TokenMismatchError(data_id=e.data_id, completion=e.completion)
                         return False
 
-                    if isinstance(e, RateLimitError):
-                        retry_logger.error(f"{error_msg} occurred. Waiting 60 seconds...")
-                        time.sleep(30)
+                    if isinstance(e, (RateLimitError, ServiceUnavailableError)):
+                        user_warned = True
+                        backoff = 60
 
                     if isinstance(e, InvalidRequestError):
-                        retry_logger.error(f"{error_msg} occurred. Skip all retries and return empty value.")
                         return False
+
+                    if isinstance(e, (TokenMismatchError, KeyError, JSONDecodeError)):
+                        backoff = 3
+                        if isinstance(e, TokenMismatchError):
+                            retry_logger.info(
+                                f"{Fore.LIGHTRED_EX}Token mismatch error occurred in {e.data_id}{Fore.RESET}")
 
                     if not user_warned:
                         if not isinstance(e, (TokenMismatchError, KeyError, JSONDecodeError)):
@@ -161,7 +177,7 @@ def retry_api(
                             retry_logger.error(f"{e} occurred. Max retries reached. Returning empty value.")
                             return False
 
-                backoff = 60  # 1 minute
+                backoff = backoff if backoff else 30
                 retry_logger.warning(backoff_msg.format(backoff=backoff))
                 time.sleep(backoff)
 
@@ -173,7 +189,7 @@ def retry_api(
 @retry_api()
 def create_chat_completion(
         messages: List[MessageDict],
-        question_tokens,
+        raw_question,
         role,
         *_,
         **kwargs,
@@ -200,8 +216,11 @@ def create_chat_completion(
         import json
         check_json_decode_error = json.loads(completion.choices[0].message.function_call.arguments)
 
-        if len(question_tokens) != len(check_json_decode_error["response"]):
-            raise TokenMismatchError("Mismatch between question tokens and response tokens.")
+        if len(raw_question["tokens"]) != len(check_json_decode_error["response"]) or \
+                ((temp_answer := convert_openai_answer_when_token_mismatch(completion.choices[0].message,
+                                                                           data_id=raw_question["id"]))
+                 and raw_question["tokens"] != temp_answer.tokens):
+            raise TokenMismatchError(data_id=raw_question["id"], completion=completion)
 
     if hasattr(completion, "error"):
         chat_logger.warning(f"Response: {completion}")
