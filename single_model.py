@@ -37,6 +37,9 @@ def validate_dataset_language(args):
         if args.dataset_lang != "en":
             raise ValueError(error_msg.format(language=LANGUAGES[args.dataset_lang]))
 
+    if args.ask_oracle and args.mix_dataset_mode == "original":
+        raise ValueError("Original dataset does not need LLM. So LLM is not executed.")
+
 
 def find_logging_file_name(args):
     model_names_for_log_name = args["model_names"].replace('-', '_')
@@ -80,8 +83,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     validate_dataset_language(args)  # 도메인 데이터셋과 데이터셋 언어 설정이 맞는지 확인
 
-    # python script.py --ask_oracle: 출력은 True
-    # python script.py: 출력은 False
+    # python script.py --ask_oracle, store_false: 출력은 True,
+    # 파일 실행 시 store_false는 명시했을 때 True 값을 지님
     # pycharm 실행 시 store_true -> False
     # pycharm 실행 시 store_false -> True
 
