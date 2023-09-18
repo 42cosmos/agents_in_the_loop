@@ -194,9 +194,9 @@ class ChatModelResponse(LLMResponse):
 
 @dataclass
 class EntityAgentResponse:
-    data_id: str
     tokens: List[str]
     ner_tags: List[str]
+    data_id: Union[str, None] = None
 
     def raw(self) -> MessageDict:
         return {"id": self.data_id, "tokens": self.tokens, "ner_tags": self.ner_tags}
