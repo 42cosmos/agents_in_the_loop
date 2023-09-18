@@ -467,11 +467,11 @@ if __name__ == "__main__":
             logging.warning(f"Test dataset is not provided.")
 
     if args.save_model:
-        os.makedirs("outputs", exist_ok=True)
         for model_name, trainer_dict in model_trainers.items():
             trainer = trainer_dict["trainer"]
+            model_path = os.path.join(trainer.model_args.output_dir, logging_file_name, model_name)
+            os.makedirs(model_path, exist_ok=True)
+
             trainer_tokenizer = trainer.tokenizer
-            trainer_dict["trainer"].save_model(os.path.join(trainer.model_args.output_dir, logging_file_name))
-            torch.save(trainer.train_dataset,
-                       os.path.join(trainer.model_args.output_dir, logging_file_name,
-                                    f"{model_name}-train_dataset"))  # 학습 데이터 저장
+            trainer_dict["trainer"].save_model(model_path)
+            torch.save(trainer.train_dataset, os.path.join(model_path, "train_dataset"))  # 학습 데이터 저장
