@@ -15,7 +15,7 @@ from utils.llm.openai_utils import (
     OpenAIFunctionSpec,
     OPEN_AI_CHAT_MODELS,
     ner_gpt_function,
-    create_chat_completion as openai_chat_completion
+    create_chat_completion as openai_chat_completion, TokenMismatchError
 )
 
 from utils.llm.token_counter import count_message_tokens
@@ -23,6 +23,7 @@ from utils.throttling import TokenThrottling
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 
 def create_chat_completion(
         agent,
@@ -49,9 +50,7 @@ def create_chat_completion(
     if model_max_tokens - reserved_tokens <= 0:
         model_max_tokens += int(reserved_tokens / 2)
 
-    logger.debug(
-        f"{Fore.GREEN}Creating chat completion with model {model.name}, max_tokens {model_max_tokens}{Fore.RESET}"
-    )
+    logger.debug(f"{Fore.GREEN} {raw_question_data['id']} max_tokens {model_max_tokens}{Fore.RESET}")
 
     chat_completion_kwargs = {"model": config.model_name,
                               "max_tokens": model_max_tokens}
@@ -67,24 +66,30 @@ def create_chat_completion(
     response = openai_chat_completion(
         role=agent.role,
         messages=prompt.raw(),
-        question_tokens=raw_question_data["tokens"],
+        raw_question=raw_question_data,
         **chat_completion_kwargs,
     )
 
     if not response:
         return ChatModelResponse(
             role=agent.role,
-            data_id=raw_question_data["id"],
             model_info=model,
+            data_id=raw_question_data["id"],
         )
 
     if hasattr(response, "error"):
         logger.error(response.error)
         raise RuntimeError(response.error)
 
-    first_message = response.choices[0].message
-    content: str | None = first_message.get("content")
-    function_call = first_message.get("function_call")
+    if isinstance(response, TokenMismatchError):
+        response = response.completion
+        first_message = response.choices[0].message
+        content: str | None = first_message.get("function_call")
+        function_call = None
+    else:
+        first_message = response.choices[0].message
+        content: str | None = first_message.get("content")
+        function_call = first_message.get("function_call")
 
     prompt_token_usage = response.get("usage").get("prompt_tokens")
     completion_token_usage = response.get("usage").get("completion_tokens")
