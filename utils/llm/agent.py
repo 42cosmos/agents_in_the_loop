@@ -113,6 +113,8 @@ class Agent:
 
     def _get_basic_prompt(self):
         information = self.db_client.get_value(f"prompt:{self.dataset_name}")
+        assert information is not None, f"Please set prompt:{self.dataset_name} in redis"
+
         warning_sign = ""
         if self.role == "student":
             warning_sign = self.db_client.get_value(f"prompt:warning")
@@ -133,15 +135,14 @@ class Agent:
             [
                 Message("system", self.system_prompt),
                 Message("user", self.ner_guidance),
-                Message("user", triggering_prompt)
             ],
         )
 
-        if examples is None:
-            return message_sequence
+        if examples:
+            for example in examples:
+                message_sequence.append(example)
 
-        for example in examples:
-            message_sequence.append(example)
+        message_sequence.append(Message("user", triggering_prompt))
         return message_sequence
 
     def create_chat_with_agent(self,
@@ -170,15 +171,25 @@ class Teacher(Agent):
         super().__init__("teacher", config, db_client, dataset_name, dataset_lang)
         self.logger = logging.getLogger(__class__.__qualname__)
 
-    def give_feedback(self, raw_data, student_reply, throttling: TokenThrottling = None):
-        if student_reply is None or student_reply.tokens is None:
+    def give_feedback(self,
+                      raw_data,
+                      student_reply,
+                      throttling: TokenThrottling = None,
+                      raise_token_mismatch: bool = False):
+        prompt = "You MUST TELL the student that they have to create an answer based on the truncated words in the given sentence. The Student MUST answer based on the truncated words removed from the given sentence."
+        if raise_token_mismatch:
+            self.logger.info(f"{raw_data['id']} has token mismatch in First Answer")
+            prompt += f"""But The Student has changed the separated words in the sentence. Student should have answered {len(raw_data["tokens"])}, but answered {len(student_reply.tokens)}. EMPHASISE that student should only answer as many objects as there are truncated words in the given sentence."""
+            prompt += f"and Please give some instructions to solve this question to find the entity.\nQuestion Sentence: {raw_data['tokens']}\nStudent's Answer: {student_reply.ner_tags} "
+
+        elif student_reply is None or student_reply.tokens is None:
             self.logger.info(f"{raw_data['id']} has no answer")
-            prompt = f"""There is no given answer. Please give some detailed instructions to solve this question to find the entity. \n Question Sentence: {raw_data["tokens"]}"""
+            prompt = f"""There is no given answer from student. Please give some detailed instructions to solve this question to find the entity. \nQuestion Sentence: {raw_data["tokens"]}"""
 
         else:
             problem_sentence = student_reply.tokens
             student_answer = student_reply.ner_tags
-            prompt = f"""Here's the sentence in which the student has to find the entity, and the answer given by the student:\nQuestion Sentence: {str(problem_sentence)}\nStudent's Answer: "{student_answer}" """.strip()
+            prompt = f"""Here's the sentence in which the student has to find the entity, and the answer given by the student:\nQuestion Sentence: {problem_sentence}\nStudent's Answer: "{student_answer}" """.strip()
         assistant_reply = self.create_chat_with_agent(raw_question_data=raw_data,
                                                       user_sentence=prompt,
                                                       throttling=throttling)
@@ -195,6 +206,7 @@ class Student(Agent):
                                dataset_lang=dataset_lang)
 
         self.logger = logging.getLogger(__class__.__qualname__)
+        self.dataset_lang = dataset_lang
         model_info = OPEN_AI_CHAT_MODELS[self.config.model_name]
         # https://platform.openai.com/account/rate-limits
         request_per_second = model_info.RPM / 60
@@ -210,17 +222,25 @@ class Student(Agent):
         get_predicted_token_usage = count_expected_tokens(raw_data["tokens"])
 
         self.logger.info(f"Processing example: {raw_data['id']}")
-        answers = {"1": self.create_chat_with_agent(user_sentence=str(raw_data["tokens"]),
+        original_sent = " ".join(raw_data["tokens"]) if not self.dataset_lang == "ja" else "".join(raw_data["tokens"])
+        user_sentence = f"""Original Sentence: {original_sent}\nDivided as: {raw_data["tokens"]}"""
+        answers = {"1": self.create_chat_with_agent(user_sentence=user_sentence,
                                                     raw_question_data=raw_data,
                                                     function_call_examples=similar_examples,
                                                     expected_return_tokens=get_predicted_token_usage,
                                                     throttling=self.throttling)}  # student 1
 
         if get_feedback:
-            student_first_answer, _ = answer_to_data(answers["1"])
+            raise_token_mismatch = False
+            if answers["1"].content:  # TokenMismatchError로 인해 값이 function_call에 들어가지 못하고 content에 안착
+                self.logger.info(f"{raw_data['id']} has token mismatch in First Answer")
+                raise_token_mismatch = True
+
+            student_first_answer, _ = answer_to_data(answers["1"], raise_token_mismatch=raise_token_mismatch)
             teachers_feedback = self.teacher.give_feedback(raw_data=raw_data,
                                                            student_reply=student_first_answer,
-                                                           throttling=self.throttling)
+                                                           throttling=self.throttling,
+                                                           raise_token_mismatch=raise_token_mismatch)
 
             final_answer = self._finalise_reply(raw_data=raw_data,
                                                 initial_answer=student_first_answer,
@@ -249,13 +269,15 @@ class Student(Agent):
                         function_call_examples,
                         throttling: TokenThrottling = None):
 
-        combined_prompt = f"""Question Sentence: {raw_data["tokens"]}\nYour initial answer: """
+        combined_prompt = f"""Peer Review: {teacher_feedback}\n\nPlease write your final answer."""
+        combined_prompt += f"""Question Sentence: {raw_data["tokens"]}\nYour initial answer: """
         if initial_answer is None or initial_answer.ner_tags is None:
             combined_prompt += "Nothing"
         else:
             combined_prompt += f"{initial_answer.ner_tags}"
 
-        combined_prompt += f"""Peer Review: {teacher_feedback}\n\nPlease write your final answer."""
+        combined_prompt += f""" you should have answered {len(raw_data["tokens"])}. You have to answer as many things as there are truncated words in the given sentence."""
+
         final_reply = self.create_chat_with_agent(raw_question_data=raw_data,
                                                   user_sentence=combined_prompt,
                                                   function_call_examples=function_call_examples,
@@ -311,7 +333,7 @@ def make_example(example, id_to_label=None):
     return {"response": [{"word": token, "entity": tag} for token, tag in zip(tokens, ner_tags)]}
 
 
-def answer_to_data(answer, label_to_id=None, data_id=None):
+def answer_to_data(answer, label_to_id=None, data_id=None, raise_token_mismatch: bool = False):
     logger_name = f"{answer_to_data.__name__}"
     if data_id:
         # data_id -> DB의 값을 가져오는 경우 값 존재
@@ -331,8 +353,10 @@ def answer_to_data(answer, label_to_id=None, data_id=None):
 
     else:
         data_id = answer.data_id
-        if answer.function_call:
-            json_response = json.loads(answer.function_call.arguments)
+        answer = answer.content if raise_token_mismatch else answer.function_call
+
+        if answer:
+            json_response = json.loads(answer.arguments)
 
     response = json_response["response"]
     if response:
