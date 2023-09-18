@@ -10,13 +10,13 @@ from datasets import load_dataset
 
 
 class NerProcessor:
-    def __init__(self, args, test: int = 0):
+    def __init__(self, args, split: int = 0):
         self.logger = logging.getLogger(__name__.split(".")[-1])
 
-        self.test = test
+        self.split = split
         self.args = args
         self.mode = args.data_mode
-        self.dataset_name = f"eunbincosmos/{self.args.dataset_name}-{self.args.dataset_lang}"
+        self.dataset_name = f"cosmos42/{self.args.dataset_name}-{self.args.dataset_lang}"
 
         cached_file_name = f"cached-{self.args.dataset_name}-{self.args.dataset_lang}_{self.args.data_mode}-seq_len_{self.args.max_seq_length}"
         if "/" in cached_file_name:
@@ -28,8 +28,8 @@ class NerProcessor:
         if "original" != self.args.data_mode:
             cached_file_name += f"-{self.args.initial_train_n_percentage}%"
 
-        if self.test > 0:
-            cached_file_name = f"TEST_{self.test}::{cached_file_name}"
+        if self.split > 0:
+            cached_file_name = f"TEST_{self.split}::{cached_file_name}"
 
         self.cached_file_name = cached_file_name
         self.cached_features_file = os.path.join(self.args.data_dir, cached_file_name)
@@ -95,8 +95,8 @@ class NerProcessor:
                 [col for col in self.raw_dataset[split].column_names if col not in required_columns])
 
         self.train_dataset = self.raw_dataset["train"]
-        if self.test > 0:
-            self.train_dataset = self.train_dataset.select(range(self.test))
+        if self.split > 0:
+            self.train_dataset = self.train_dataset.select(range(self.split))
 
         self.valid_dataset = self.raw_dataset["validation"]
         self.test_dataset = self.raw_dataset["test"] if "test" in self.raw_dataset else None
