@@ -17,21 +17,24 @@ import yaml
 from easydict import EasyDict
 
 
-def setup_logging(file_name=None):
+def setup_logging(logging_path=None, file_name=None):
     main_script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    logs_dir = os.path.join(main_script_dir, "logs")
-    os.makedirs(logs_dir, exist_ok=True)
+    if logging_path is None:
+        logging_path = os.path.join(main_script_dir, "logs")
+        os.makedirs(logging_path, exist_ok=True)
 
     today = f'[{datetime.datetime.today().strftime("%Y-%m-%d-%H:%M:%S")}]'
 
     log_config_file = os.path.join(main_script_dir, "logging_config.json")
+    if not os.path.isfile(log_config_file):
+        raise ValueError(f"logging_config.json not found in {main_script_dir}")
 
     if file_name:
-        log_file = os.path.join(logs_dir, f"{today}-{file_name}.log")
+        log_file = os.path.join(logging_path, f"{today}-{file_name}.log")
     else:
-        log_file = os.path.join(logs_dir, f"{today}.log")
+        log_file = os.path.join(logging_path, f"{today}.log")
 
-    os.makedirs(logs_dir, exist_ok=True)
+    os.makedirs(logging_path, exist_ok=True)
 
     if os.path.exists(log_config_file):
         with open(log_config_file, 'rt') as f:
