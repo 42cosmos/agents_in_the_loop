@@ -290,6 +290,9 @@ class RedisLLMResponse(RedisClient):
                 if agent_role == "student":
                     if data.function_call:
                         llm_answer = data.function_call.arguments
+                    if data.content:
+                        llm_answer = data.content.arguments
+
                 else:
                     llm_answer = data.content
 
