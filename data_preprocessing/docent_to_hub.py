@@ -117,21 +117,21 @@ if __name__ == "__main__":
 
         final_data.extend(new_data)
 
-        dataset_features = Features({
-            "id": Value(dtype="string"),
-            "tokens": Sequence(feature=Value(dtype="string")),
-            "ner_tags": Sequence(ClassLabel(names=label_list))
-        })
+    dataset_features = Features({
+        "id": Value(dtype="string"),
+        "tokens": Sequence(feature=Value(dtype="string")),
+        "ner_tags": Sequence(ClassLabel(names=label_list))
+    })
 
-        docent_all = Dataset.from_list(final_data, features=dataset_features)
-        train_test_valid = docent_all.train_test_split(test_size=0.3, shuffle=True)
-        test_valid = train_test_valid["test"].train_test_split(test_size=0.5, shuffle=True)
+    docent_all = Dataset.from_list(final_data, features=dataset_features)
+    train_test_valid = docent_all.train_test_split(test_size=0.3, shuffle=True)
+    test_valid = train_test_valid["test"].train_test_split(test_size=0.5, shuffle=True)
 
-        dataset_to_push = DatasetDict({
-            "train": train_test_valid["train"],
-            "validation": test_valid["train"],
-            "test": test_valid["test"],
-        })
+    dataset_to_push = DatasetDict({
+        "train": train_test_valid["train"],
+        "validation": test_valid["train"],
+        "test": test_valid["test"],
+    })
 
-        push_to_hub_dataset = dataset_to_push.map(add_id, with_indices=True)
-        push_to_hub_dataset.push_to_hub("cosmos42/docent-ko")
+    push_to_hub_dataset = dataset_to_push.map(add_id, with_indices=True)
+    push_to_hub_dataset.push_to_hub("cosmos42/docent-ko")
