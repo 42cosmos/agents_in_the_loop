@@ -82,56 +82,56 @@ if __name__ == "__main__":
                   'B-PS', 'I-PS', 'B-QT', 'I-QT', 'B-TI', 'I-TI', 'B-DUR', 'I-DUR', 'O']
     id_to_label = dict(enumerate(label_list))
 
-failed_data = []
-final_data = []
-for number, data in enumerate(tqdm(docents)):
-    tokens = data["tokens"]
-    ner_tags = data["ner_tags"]
-    assert len(tokens) == len(ner_tags), "데이터가 잘못됨"
-    joined_text = "".join(tokens)
+    failed_data = []
+    final_data = []
+    for number, data in enumerate(tqdm(docents)):
+        tokens = data["tokens"]
+        ner_tags = data["ner_tags"]
+        assert len(tokens) == len(ner_tags), "데이터가 잘못됨"
+        joined_text = "".join(tokens)
 
-    split_results = kss.split_sentences(joined_text)
-    new_tags = renew_tags(ner_tags)
+        split_results = kss.split_sentences(joined_text)
+        new_tags = renew_tags(ner_tags)
 
-    new_data = []
-    for idx, sent in enumerate(split_results):
-        temp_text = re.sub(r'[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]', 'X', joined_text)
-        temp_search_text = re.sub(r'[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]', 'X', sent)
+        new_data = []
+        for idx, sent in enumerate(split_results):
+            temp_text = re.sub(r'[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]', 'X', joined_text)
+            temp_search_text = re.sub(r'[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]', 'X', sent)
 
-        start_index = temp_text.index(temp_search_text)
-        end_index = start_index + len(sent)
+            start_index = temp_text.index(temp_search_text)
+            end_index = start_index + len(sent)
 
-        does_same_length = joined_text[start_index:end_index] == sent
+            does_same_length = joined_text[start_index:end_index] == sent
 
-        if not does_same_length:
-            break
+            if not does_same_length:
+                break
 
-        split_tags = new_tags[start_index:end_index]
+            split_tags = new_tags[start_index:end_index]
 
-        if len(split_tags) != len(list(sent)):
-            failed_data.append(number)
-            print(number)
-            new_data = []
-        else:
-            new_data.append({"id": number, "tokens": list(sent), "ner_tags": split_tags})
+            if len(split_tags) != len(list(sent)):
+                failed_data.append(number)
+                print(number)
+                new_data = []
+            else:
+                new_data.append({"id": number, "tokens": list(sent), "ner_tags": split_tags})
 
-    final_data.extend(new_data)
+        final_data.extend(new_data)
 
-    dataset_features = Features({
-        "id": Value(dtype="string"),
-        "tokens": Sequence(feature=Value(dtype="string")),
-        "ner_tags": Sequence(ClassLabel(names=label_list))
-    })
+        dataset_features = Features({
+            "id": Value(dtype="string"),
+            "tokens": Sequence(feature=Value(dtype="string")),
+            "ner_tags": Sequence(ClassLabel(names=label_list))
+        })
 
-    docent_all = Dataset.from_list(final_data, features=dataset_features)
-    train_test_valid = docent_all.train_test_split(test_size=0.3, shuffle=True)
-    test_valid = train_test_valid["test"].train_test_split(test_size=0.5, shuffle=True)
+        docent_all = Dataset.from_list(final_data, features=dataset_features)
+        train_test_valid = docent_all.train_test_split(test_size=0.3, shuffle=True)
+        test_valid = train_test_valid["test"].train_test_split(test_size=0.5, shuffle=True)
 
-    dataset_to_push = DatasetDict({
-        "train": train_test_valid["train"],
-        "validation": test_valid["train"],
-        "test": test_valid["test"],
-    })
+        dataset_to_push = DatasetDict({
+            "train": train_test_valid["train"],
+            "validation": test_valid["train"],
+            "test": test_valid["test"],
+        })
 
-    push_to_hub_dataset = dataset_to_push.map(add_id, with_indices=True)
-    push_to_hub_dataset.push_to_hub("cosmos42/docent-ko")
+        push_to_hub_dataset = dataset_to_push.map(add_id, with_indices=True)
+        push_to_hub_dataset.push_to_hub("cosmos42/docent-ko")
