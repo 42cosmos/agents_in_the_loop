@@ -215,11 +215,13 @@ def create_chat_completion(
     if role == "student":
         import json
         check_json_decode_error = json.loads(completion.choices[0].message.function_call.arguments)
-
-        if len(raw_question["tokens"]) != len(check_json_decode_error["response"]) or \
-                ((temp_answer := convert_openai_answer_when_token_mismatch(completion.choices[0].message,
-                                                                           data_id=raw_question["id"]))
-                 and raw_question["tokens"] != temp_answer.tokens):
+        try:
+            temp_answer = convert_openai_answer_when_token_mismatch(completion.choices[0].message,
+                                                                    data_id=raw_question["id"])
+            if len(raw_question["tokens"]) != len(check_json_decode_error["response"]) or \
+                    (raw_question["tokens"] != temp_answer.tokens):
+                raise TokenMismatchError(data_id=raw_question["id"], completion=completion)
+        except TypeError as type_error:
             raise TokenMismatchError(data_id=raw_question["id"], completion=completion)
 
     if hasattr(completion, "error"):

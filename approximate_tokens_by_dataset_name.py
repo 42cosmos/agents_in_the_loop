@@ -49,7 +49,7 @@ def get_token_usage(example):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name", type=str, default="bionlp2004",
+    parser.add_argument("--dataset_name", type=str, default="polyglot",
                         choices=["wikiann", "polyglot", "mit_restaurant", "mit_movie_trivia", "bionlp2004"])
 
     parser.add_argument("--dataset_lang", type=str, default="en",
@@ -68,7 +68,7 @@ if __name__ == "__main__":
                                       data_mode=args.mix_dataset_mode
                                       )
 
-    processor = NerProcessor(data_args)
+    processor = NerProcessor(data_args, split=20000)
     initial_train_dataset, train_dataset, eval_dataset, test_dataset = processor.get_dataset()
     logging.info(f"Initial Train dataset size: {initial_train_dataset.num_rows}")
 

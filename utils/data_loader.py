@@ -7,10 +7,14 @@ import numpy as np
 
 import torch
 from datasets import load_dataset
+from transformers import set_seed
+
+from utils.main_utils import match_indices_from_base_dataset
 
 
 class NerProcessor:
     def __init__(self, args, split: int = 0):
+        set_seed(42)
         self.logger = logging.getLogger(__name__.split(".")[-1])
 
         self.split = split
@@ -57,7 +61,7 @@ class NerProcessor:
         self.end_tag = max(key for key in self.id_to_label if key != self.ignore_entity)
 
     def get_dataset_with_train_dataset_in_arch(self, train_dataset_path):
-        self.logger.info(f"Loading Used Train Dataset from cached file {self.cached_file_name}")
+        self.logger.info(f"Loading Used Train Dataset from cached file {train_dataset_path}")
         loaded_data = torch.load(self.cached_features_file)
         _, _, self.valid_dataset, self.test_dataset = loaded_data
         self.update_label_list()
@@ -69,9 +73,29 @@ class NerProcessor:
 
         return self.train_dataset, self.valid_dataset, self.test_dataset
 
-    def get_dataset(self, train_dataset_path=None):
+    def get_dataset(self,
+                    train_dataset_path=None,
+                    use_original_num_in_arch=False):
+
         if train_dataset_path:
-            return self.get_dataset_with_train_dataset_in_arch(train_dataset_path)
+            if not use_original_num_in_arch:
+                # 아키텍쳐의 결과로 나온 데이터셋만을 사용
+                return self.get_dataset_with_train_dataset_in_arch(train_dataset_path)
+
+            else:
+                # 아키텍쳐의 결과의 원본 데이터셋으로 사용
+                temp_train_dataset, valid_dataset, test_dataset = \
+                    self.get_dataset_with_train_dataset_in_arch(train_dataset_path)
+                logging.info(f"{temp_train_dataset.num_rows} 개의 학습 결과 데이터셋의 원본을 추출")
+
+                original_train_dataset = load_dataset(self.dataset_name, split="train")
+                origin_col_names = original_train_dataset.column_names
+                remain_columns = list(set(origin_col_names) - {"id", "ner_tags", "tokens"})
+
+                train_dataset = match_indices_from_base_dataset(original_train_dataset,
+                                                                temp_train_dataset["id"],
+                                                                remove=False)
+                return train_dataset.remove_columns(remain_columns), valid_dataset, test_dataset
 
         cached_file = self.get_cached_dataset()
         if cached_file:

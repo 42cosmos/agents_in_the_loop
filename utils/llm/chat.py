@@ -170,7 +170,10 @@ def chat_with_agent(agent,
     # Update full message history
     agent.history.append(message_sequence.messages[-1])
     if agent.role == "student":
-        print(f"{raw_question_data['id']}: {agent.role} -> {assistant_reply.function_call}")
+        if assistant_reply.function_call:
+            import json
+            a = json.dumps(assistant_reply.function_call.arguments, ensure_ascii=False)
+            print(f"{raw_question_data['id']}: {agent.role} -> {a}")
         agent.history.add("assistant", assistant_reply, assistant_reply.function_call)
         return assistant_reply
 

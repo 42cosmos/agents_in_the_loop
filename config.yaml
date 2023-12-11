@@ -1,10 +1,10 @@
 student:
   model_name: gpt-3.5-turbo-0613
-  env_path: /home/eunbinpark/workspace/agents_in_the_loop/utils/.env
+  env_path: /home/eunbinpark/workspace/_agents_in_the_loop/utils/.env
   max_conversation_limit: 2
 
 
 teacher:
   model_name: gpt-3.5-turbo-0613
-  env_path: /home/eunbinpark/workspace/agents_in_the_loop/utils/.env
+  env_path: /home/eunbinpark/workspace/_agents_in_the_loop/utils/.env
   max_conversation_limit: 1

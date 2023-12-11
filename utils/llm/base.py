@@ -38,7 +38,7 @@ class MessageFunctionCall:
     content: MessageType | None = None
 
     def raw(self) -> MessageDict:
-        return {"role": self.role, "name": self.name, "content": json.dumps(self.content)}
+        return {"role": self.role, "name": self.name, "content": json.dumps(self.content, ensure_ascii=False)}
 
 
 @dataclass

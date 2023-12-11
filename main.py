@@ -18,6 +18,7 @@ import numpy as np
 
 import torch
 from datasets import concatenate_datasets, Dataset
+from transformers import set_seed
 
 from single_model import validate_dataset_language
 
@@ -45,6 +46,7 @@ from utils.llm.agent import Student, answer_to_data, get_similar_dataset, get_ex
 
 import concurrent.futures
 
+set_seed(42)
 
 def process_llm(random_data,
                 prompt_examples: List[MessageFunctionCall],
@@ -223,7 +225,7 @@ def get_llm_labeling(agent: Student,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name", type=str, default="mit_restaurant",
+    parser.add_argument("--dataset_name", type=str, default="wikiann",
                         choices=["mit_restaurant", "mit_movie_trivia", "bionlp2004", "wikiann", "polyglot", "docent"])
     parser.add_argument("--dataset_lang", type=str, default="en", choices=["ko", "en", "ja", "pl", "id"])
     parser.add_argument("--model_name", type=str, default="bert-base-multilingual-uncased xlm-roberta-base")
@@ -264,7 +266,10 @@ if __name__ == "__main__":
     setup_logging(file_name=logging_file_name)
     logging.info(f"Base Arguments: {args}")
 
-    processor = NerProcessor(data_args)
+    split = 0
+    if args.dataset_name == "polyglot":
+        split = 20000
+    processor = NerProcessor(data_args, split=split)
     initial_train_dataset, pool_dataset, eval_dataset, test_dataset = processor.get_dataset()
     logging.info(f"Initial Train dataset size: {initial_train_dataset.num_rows}")
 
